@@ -1,0 +1,23 @@
+structure Config :> CONFIG = struct
+
+val bin = "@BIN@"
+val lib = "@LIB@"
+val includ = "@INCLUDE@"
+val sitelisp = "@SITELISP@"
+
+val libUr = OS.Path.joinDirFile {dir = lib,
+                                 file = "ur"}
+val libC = OS.Path.joinDirFile {dir = lib,
+                                file = "c"}
+val libJs = OS.Path.joinDirFile {dir = lib,
+                                 file = "js"}
+
+val ccompiler = "@CC@"
+val gccArgs = "@GCCARGS@"
+val openssl = "@OPENSSL_LDFLAGS@ @OPENSSL_LIBS@"
+
+val pgheader = "@PGHEADER@"
+val msheader = "@MSHEADER@"
+val sqheader = "@SQHEADER@"
+
+end

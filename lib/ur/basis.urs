@@ -593,6 +593,7 @@ val setval : sql_sequence -> int -> transaction unit
 (** XML *)
 
 type css_class
+val show_css_class : show css_class
 val classes : css_class -> css_class -> css_class
 (* The equivalent of writing one class after the other, separated by a space, in
  * an HTML 'class' attribute *)
@@ -824,10 +825,10 @@ val tr : other ::: {Unit} -> [other ~ [Body, Table, Tr]] => unit
   -> tag tableAttrs
          ([Body, Table] ++ other) ([Body, Tr] ++ other) [] []
 val th : other ::: {Unit} -> [other ~ [Body, Tr]] => unit
-  -> tag ([Colspan = int] ++ tableAttrs)
+  -> tag ([Colspan = int, Rowspan = int] ++ tableAttrs)
          ([Body, Tr] ++ other) ([Body] ++ other) [] []
 val td : other ::: {Unit} -> [other ~ [Body, Tr]] => unit
-  -> tag ([Colspan = int] ++ tableAttrs)
+  -> tag ([Colspan = int, Rowspan = int] ++ tableAttrs)
          ([Body, Tr] ++ other) ([Body] ++ other) [] []
 
 

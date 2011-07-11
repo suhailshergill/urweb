@@ -14,6 +14,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <openssl/des.h>
+#include <openssl/rand.h>
 #include <time.h>
 
 #include <pthread.h>
@@ -3777,8 +3778,13 @@ uw_Basis_unit uw_Basis_debug(uw_context ctx, uw_Basis_string s) {
 }
 
 uw_Basis_int uw_Basis_rand(uw_context ctx) {
-  uw_Basis_int n = abs(rand());
-  return n;
+  uw_Basis_int ret;
+  int r = RAND_bytes((unsigned char *)&ret, sizeof ret);
+  
+  if (r)
+    return abs(ret);
+  else
+    uw_error(ctx, FATAL, "Random number generation failed");
 }
 
 void uw_noPostBody(uw_context ctx) {
@@ -3800,6 +3806,10 @@ void uw_isPost(uw_context ctx) {
 
 uw_Basis_bool uw_Basis_currentUrlHasPost(uw_context ctx) {
   return ctx->isPost;
+}
+
+uw_Basis_bool uw_Basis_currentUrlHasQueryString(uw_context ctx) {
+  return ctx->queryString != NULL && ctx->queryString[0] != 0;
 }
 
 void uw_setQueryString(uw_context ctx, uw_Basis_string s) {
@@ -3893,4 +3903,14 @@ failure_kind uw_begin_onError(uw_context ctx, char *msg) {
 
 void uw_mayReturnIndirectly(uw_context ctx) {
   ctx->allowed_to_return_indirectly = 1;
+}
+
+void uw_cutErrorLocation(char *s) {
+  char *s2;
+
+  s2 = strstr(s, ": ");
+  if (s2 == NULL || strcspn(s, "<&") < s2 - s)
+    return;
+
+  memmove(s, s2+2, strlen(s2+2)+1);
 }

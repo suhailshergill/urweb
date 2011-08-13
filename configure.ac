@@ -1,10 +1,13 @@
-AC_INIT([urweb], [1.0])
+AC_INIT([urweb], [20110715])
+WORKING_VERSION=1
 AC_USE_SYSTEM_EXTENSIONS
 AM_INIT_AUTOMAKE([-Wall -Werror foreign no-define])
 AC_PROG_CC()
 AC_PROG_LIBTOOL()
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_HEADERS([config.h])
+
+AX_PTHREAD([echo >/dev/null], [echo "Your C compiler does not support POSIX threads."; exit 1])
 
 AX_CHECK_OPENSSL([echo >/dev/null], [echo "You must install OpenSSL development files."; exit 1])
 
@@ -79,15 +82,22 @@ if test [-z $SQHEADER]; then
    SQHEADER=sqlite3.h
 fi
 
+if test [$WORKING_VERSION = "1"]; then
+   VERSION="$VERSION + `hg identify || (cat .hg_archival.txt | grep 'node\:') || echo ?`"
+fi
+
 AC_SUBST(CC)
 AC_SUBST(BIN)
 AC_SUBST(LIB)
 AC_SUBST(INCLUDE)
 AC_SUBST(SITELISP)
-AC_SUBST(GCCARGS)
+AC_SUBST(CCARGS)
 AC_SUBST(PGHEADER)
 AC_SUBST(MSHEADER)
 AC_SUBST(SQHEADER)
+AC_SUBST(VERSION)
+AC_SUBST(PTHREAD_CFLAGS)
+AC_SUBST(PTHREAD_LIBS)
 
 AC_CONFIG_FILES([
         Makefile
@@ -105,8 +115,10 @@ Ur/Web configuration:
   include directory:   INCLUDE        $INCLUDE
   site-lisp directory: SITELISP       $SITELISP
   C compiler:          CC             $CC
-  Extra GCC args:      GCCARGS        $GCCARGS  
+  Extra CC args:       CCARGS         $CCARGS  
   Postgres C header:   PGHEADER       $PGHEADER
   MySQL C header:      MSHEADER       $MSHEADER
   SQLite C header:     SQHEADER       $SQHEADER
+
+  Version:             $VERSION
 EOF

@@ -32,9 +32,18 @@ val demo = ref (NONE : (string * bool) option)
 val tutorial = ref false
 val css = ref false
 
+fun printVersion () = (print (Config.versionString ^ "\n");
+		       OS.Process.exit OS.Process.success)
+fun printNumericVersion () = (print (Config.versionNumber ^ "\n");
+			      OS.Process.exit OS.Process.success)
+
 fun doArgs args =
     case args of
         [] => ()
+      | "-version" :: rest => 
+	printVersion ()
+      | "-numeric-version" :: rest =>
+	printNumericVersion ()
       | "-css" :: rest =>
         (css := true;
          doArgs rest)
@@ -70,6 +79,9 @@ fun doArgs args =
          doArgs rest)
       | "-tc" :: rest =>
         (tc := true;
+         doArgs rest)
+      | "-dumpTypes" :: rest =>
+        (Elaborate.dumpTypes := true;
          doArgs rest)
       | "-output" :: s :: rest =>
         (Settings.setExe (SOME s);
@@ -119,7 +131,7 @@ val () = doArgs (CommandLine.arguments ())
 val job =
     case !sources of
         [file] => file
-      | _ => raise Fail "Zero or multiple job files specified"
+      | _ => printVersion ()
 
 val () =
     case (!css, !demo, !tutorial) of

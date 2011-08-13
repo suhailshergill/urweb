@@ -13,11 +13,17 @@ val libJs = OS.Path.joinDirFile {dir = lib,
                                  file = "js"}
 
 val ccompiler = "@CC@"
-val gccArgs = "@GCCARGS@"
+val ccArgs = "@CCARGS@"
 val openssl = "@OPENSSL_LDFLAGS@ @OPENSSL_LIBS@"
 
 val pgheader = "@PGHEADER@"
 val msheader = "@MSHEADER@"
 val sqheader = "@SQHEADER@"
+
+val versionNumber  = "@VERSION@"
+val versionString  = "The Ur/Web compiler, version " ^ versionNumber
+
+val pthreadCflags = "@PTHREAD_CFLAGS@"
+val pthreadLibs = "@PTHREAD_LIBS@"
 
 end

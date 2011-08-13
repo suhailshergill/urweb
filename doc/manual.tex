@@ -56,7 +56,7 @@ make
 sudo make install
 \end{verbatim}
 
-Some other packages must be installed for the above to work.  At a minimum, you need a standard UNIX shell, with standard UNIX tools like sed and GCC in your execution path; MLton, the whole-program optimizing compiler for Standard ML; and the development files for the OpenSSL C library.  As of this writing, in the ``testing'' version of Debian Linux, this command will install the more uncommon of these dependencies:
+Some other packages must be installed for the above to work.  At a minimum, you need a standard UNIX shell, with standard UNIX tools like sed and GCC (or an alternate C compiler) in your execution path; MLton, the whole-program optimizing compiler for Standard ML; and the development files for the OpenSSL C library.  As of this writing, in the ``testing'' version of Debian Linux, this command will install the more uncommon of these dependencies:
 \begin{verbatim}
 apt-get install mlton libssl-dev
 \end{verbatim}
@@ -87,15 +87,13 @@ apt-get install emacs-goodies-el
 
 If you don't want to install the Emacs mode, run \texttt{./configure} with the argument \texttt{--without-emacs}.
 
-Even with the right packages installed, configuration and building might fail to work.  After you run \texttt{./configure}, you will see the values of some named environment variables printed.  You may need to adjust these values to get proper installation for your system.  To change a value, store your preferred alternative in the corresponding UNIX environment variable, before running \texttt{./configure}.  For instance, here is how to change the list of extra arguments that the Ur/Web compiler will pass to GCC on every invocation.
+Even with the right packages installed, configuration and building might fail to work.  After you run \texttt{./configure}, you will see the values of some named environment variables printed.  You may need to adjust these values to get proper installation for your system.  To change a value, store your preferred alternative in the corresponding UNIX environment variable, before running \texttt{./configure}.  For instance, here is how to change the list of extra arguments that the Ur/Web compiler will pass to the C compiler and linker on every invocation.  Some older GCC versions need this setting to mask a bug in function inlining.
 
 \begin{verbatim}
-GCCARGS=-fnested-functions ./configure
+CCARGS=-fno-inline ./configure
 \end{verbatim}
 
-Some Mac OS X users have reported needing to use this particular GCCARGS value.
-
-Since the author is still getting a handle on the GNU Autotools that provide the build system, you may need to do some further work to get started, especially in environments with significant differences from Linux (where most testing is done).  The variables \texttt{PGHEADER}, \texttt{MSHEADER}, and \texttt{SQHEADER} may be used to set the proper C header files to include for the development libraries of PostgreSQL, MySQL, and SQLite, respectively.  To get libpq to link, one OS X user reported setting \texttt{GCCARGS="-I/opt/local/include -L/opt/local/lib/postgresql84"}, after creating a symbolic link with \texttt{ln -s /opt/local/include/postgresql84 /opt/local/include/postgresql}.
+Since the author is still getting a handle on the GNU Autotools that provide the build system, you may need to do some further work to get started, especially in environments with significant differences from Linux (where most testing is done).  The variables \texttt{PGHEADER}, \texttt{MSHEADER}, and \texttt{SQHEADER} may be used to set the proper C header files to include for the development libraries of PostgreSQL, MySQL, and SQLite, respectively.  To get libpq to link, one OS X user reported setting \texttt{CCARGS="-I/opt/local/include -L/opt/local/lib/postgresql84"}, after creating a symbolic link with \texttt{ln -s /opt/local/include/postgresql84 /opt/local/include/postgresql}.
 
 The Emacs mode can be set to autoload by adding the following to your \texttt{.emacs} file.
 
@@ -165,7 +163,7 @@ Here is the complete list of directive forms.  ``FFI'' stands for ``foreign func
   \item \texttt{time}: maximum running time of a single page request, in units of approximately 0.1 seconds
   \item \texttt{transactionals}: maximum number of custom transactional actions (e.g., sending an e-mail) that may be run in a single page generation
   \end{itemize}
-\item \texttt{link FILENAME} adds \texttt{FILENAME} to the list of files to be passed to the GCC linker at the end of compilation.  This is most useful for importing extra libraries needed by new FFI modules.
+\item \texttt{link FILENAME} adds \texttt{FILENAME} to the list of files to be passed to the linker at the end of compilation.  This is most useful for importing extra libraries needed by new FFI modules.
 \item \texttt{minHeap NUMBYTES} sets the initial size for thread-local heaps used in handling requests.  These heaps grow automatically as needed (up to any maximum set with \texttt{limit}), but each regrow requires restarting the request handling process.
 \item \texttt{noXsrfProtection URIPREFIX} turns off automatic cross-site request forgery protection for the page handler identified by the given URI prefix.  This will avoid checking cryptographic signatures on cookies, which is generally a reasonable idea for some pages, such as login pages that are going to discard all old cookie values, anyway.
 \item \texttt{onError Module.var} changes the handling of fatal application errors.  Instead of displaying a default, ugly error 500 page, the error page will be generated by calling function \texttt{Module.var} on a piece of XML representing the error message.  The error handler should have type $\mt{xbody} \to \mt{transaction} \; \mt{page}$.  Note that the error handler \emph{cannot} be in the application's main module, since that would register it as explicitly callable via URLs.
@@ -199,6 +197,9 @@ To stop the compilation process after type-checking, run
 \begin{verbatim}
 urweb -tc P
 \end{verbatim}
+It is often worthwhile to run \cd{urweb} in this mode, because later phases of compilation can take significantly longer than type-checking alone, and the type checker catches many errors that would traditionally be found through debugging a running application.
+
+A related option is \cd{-dumpTypes}, which, as long as parsing succeeds, outputs to stdout a summary of the kinds of all identifiers declared with \cd{con} and the types of all identifiers declared with \cd{val} or \cd{val rec}.  This information is dumped even if there are errors during type inference.  Compiler error messages go to stderr, not stdout, so it is easy to distinguish the two kinds of output programmatically.
 
 To output information relevant to CSS stylesheets (and not finish regular compilation), run
 \begin{verbatim}
@@ -322,6 +323,15 @@ These input files follow normal Ur syntax, with a few exceptions:
 \end{itemize}
 
 A word of warning: as for demo generation, tutorial generation calls Emacs to syntax-highlight Ur code.
+
+\subsection{Run-Time Options}
+
+Compiled applications consult a few environment variables to modify their behavior:
+
+\begin{itemize}
+  \item \cd{URWEB\_NUM\_THREADS}: alternative to the \cd{-t} command-line argument (currently used only by FastCGI)
+  \item \cd{URWEB\_STACK\_SIZE}: size of per-thread stacks, in bytes
+\end{itemize}
 
 
 \section{Ur Syntax}
@@ -2134,6 +2144,8 @@ $$\begin{array}{rrcll}
 
 A web application is built from a series of modules, with one module, the last one appearing in the \texttt{.urp} file, designated as the main module.  The signature of the main module determines the URL entry points to the application.  Such an entry point should have type $\mt{t1} \to \ldots \to \mt{tn} \to \mt{transaction} \; \mt{page}$, for any integer $n \geq 0$, where $\mt{page}$ is a type synonym for top-level HTML pages, defined in $\mt{Basis}$.  If such a function is at the top level of main module $M$, with $n = 0$, it will be accessible at URI \texttt{/M/f}, and so on for more deeply-nested functions, as described in Section \ref{tag} below.  Arguments to an entry-point function are deserialized from the part of the URI following \texttt{f}.
 
+Elements of modules beside the main module, including page handlers, will only be included in the final application if they are transitive dependencies of the handlers in the main module.
+
 Normal links are accessible via HTTP \texttt{GET}, which the relevant standard says should never cause side effects.  To export a page which may cause side effects, accessible only via HTTP \texttt{POST}, include one argument of the page handler of type $\mt{Basis.postBody}$.  When the handler is called, this argument will receive a value that can be deconstructed into a MIME type (with $\mt{Basis.postType}$) and payload (with $\mt{Basis.postData}$).  This kind of handler will only work with \texttt{POST} payloads of MIME types besides those associated with HTML forms; for these, use Ur/Web's built-in support, as described below.
 
 Any normal page handler may also include arguments of type $\mt{option \; Basis.queryString}$, which will be handled specially.  Rather than being deserialized from the current URI, such an argument is passed the whole query string that the handler received.  The string may be analyzed by calling $\mt{Basis.show}$ on it.  A handler of this kind may be passed as an argument to $\mt{Basis.effectfulUrl}$ to generate a URL to a page that may be used as a ``callback'' by an external service, such that the handler is allowed to cause side effects.
@@ -2375,7 +2387,7 @@ The program is translated to what is more or less a subset of C.  If any use of 
 
 \subsection{C Compilation and Linking}
 
-The output of the last phase is pretty-printed as C source code and passed to GCC.
+The output of the last phase is pretty-printed as C source code and passed to the C compiler.
 
 
 \end{document}

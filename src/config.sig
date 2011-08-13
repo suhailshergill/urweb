@@ -9,10 +9,16 @@ signature CONFIG = sig
     val libJs : string
 
     val ccompiler : string
-    val gccArgs : string
+    val ccArgs : string
     val openssl : string
 
     val pgheader : string
     val msheader : string
     val sqheader : string
+
+    val versionNumber : string
+    val versionString : string
+
+    val pthreadCflags : string
+    val pthreadLibs : string
 end

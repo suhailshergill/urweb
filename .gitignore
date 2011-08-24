@@ -54,3 +54,10 @@ Makefile.coq
 ^libtool$
 ^config.h$
 ^stamp-h1$
+
+build
+Makefile
+src/c/Makefile
+config.h
+libtool
+stamp-h1

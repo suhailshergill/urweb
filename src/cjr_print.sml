@@ -524,7 +524,7 @@ fun capitalize s =
         str (Char.toUpper (String.sub (s, 0))) ^ String.extract (s, 1, NONE)
 
 local
-    val urlHandlers = ref ([] : pp_desc list)
+    val urlHandlers = ref ([] : (pp_desc * pp_desc) list)
 in
 
 fun addUrlHandler v = urlHandlers := v :: !urlHandlers
@@ -541,16 +541,21 @@ val unurlifies = ref IS.empty
 
 fun unurlify fromClient env (t, loc) =
     let
+        fun deStar request =
+            case request of
+                "(*request)" => "request"
+              | _ => "&" ^ request
+
         fun unurlify' request t =
             case t of
-                TFfi ("Basis", "unit") => string ("uw_Basis_unurlifyUnit(ctx, &" ^ request ^ ")")
+                TFfi ("Basis", "unit") => string ("uw_Basis_unurlifyUnit(ctx, " ^ deStar request ^ ")")
               | TFfi ("Basis", "string") => string (if fromClient then
-                                                        "uw_Basis_unurlifyString_fromClient(ctx, &" ^ request ^ ")"
+                                                        "uw_Basis_unurlifyString_fromClient(ctx, " ^ deStar request ^ ")"
                                                     else
-                                                        "uw_Basis_unurlifyString(ctx, &" ^ request ^ ")")
-              | TFfi (m, t) => string ("uw_" ^ ident m ^ "_unurlify" ^ capitalize t ^ "(ctx, &" ^ request ^ ")")
+                                                        "uw_Basis_unurlifyString(ctx, " ^ deStar request ^ ")")
+              | TFfi (m, t) => string ("uw_" ^ ident m ^ "_unurlify" ^ capitalize t ^ "(ctx, " ^ deStar request ^ ")")
 
-              | TRecord 0 => string ("uw_Basis_unurlifyUnit(ctx, &" ^ request ^ ")")
+              | TRecord 0 => string ("uw_Basis_unurlifyUnit(ctx, " ^ deStar request ^ ")")
               | TRecord i =>
                 let
                     val xts = E.lookupStruct env i
@@ -623,7 +628,7 @@ fun unurlify fromClient env (t, loc) =
                 if IS.member (!unurlifies, i) then
                     box [string "unurlify_",
                          string (Int.toString i),
-                         string ("(ctx, &" ^ request ^ ")")]
+                         string ("(ctx, " ^ deStar request ^ ")")]
                 else
                     let
                         val (x, _) = E.lookupDatatype env i
@@ -638,6 +643,14 @@ fun unurlify fromClient env (t, loc) =
                     in
                         unurlifies := IS.add (!unurlifies, i);
                         addUrlHandler (box [string "static",
+                                            space,
+                                            p_typ env t,
+                                            space,
+                                            string "*unurlify_",
+                                            string (Int.toString i),
+                                            string "(uw_context, char **);",
+                                            newline],
+                                       box [string "static",
                                             space,
                                             p_typ env t,
                                             space,
@@ -721,7 +734,7 @@ fun unurlify fromClient env (t, loc) =
                 if IS.member (!unurlifies, i) then
                     box [string "unurlify_",
                          string (Int.toString i),
-                         string ("(ctx, &" ^ request ^ ")")]
+                         string ("(ctx, " ^ deStar request ^ ")")]
                 else
                     let
                         val (x, xncs) = E.lookupDatatype env i
@@ -794,6 +807,14 @@ fun unurlify fromClient env (t, loc) =
                                             space,
                                             string "unurlify_",
                                             string (Int.toString i),
+                                            string "(uw_context, char **);",
+                                            newline],
+                                       box [string "static",
+                                            space,
+                                            p_typ env (t, ErrorMsg.dummySpan),
+                                            space,
+                                            string "unurlify_",
+                                            string (Int.toString i),
                                             string "(uw_context ctx, char **request) {",
                                             newline,
                                             box [string "return",
@@ -807,17 +828,25 @@ fun unurlify fromClient env (t, loc) =
 
                         box [string "unurlify_",
                              string (Int.toString i),
-                             string ("(ctx, &" ^ request ^ ")")]
+                             string ("(ctx, " ^ deStar request ^ ")")]
                     end
 
               | TList (t', i) =>
                 if IS.member (!unurlifies, i) then
                     box [string "unurlify_list_",
                          string (Int.toString i),
-                         string ("(ctx, &" ^ request ^ ")")]
+                         string ("(ctx, " ^ deStar request ^ ")")]
                 else
                     (unurlifies := IS.add (!unurlifies, i);
                      addUrlHandler (box [string "static",
+                                         space,
+                                         p_typ env (t, loc),
+                                         space,
+                                         string "unurlify_list_",
+                                         string (Int.toString i),
+                                         string "(uw_context, char **);",
+                                         newline],
+                                    box [string "static",
                                          space,
                                          p_typ env (t, loc),
                                          space,
@@ -832,7 +861,7 @@ fun unurlify fromClient env (t, loc) =
                                               space,
                                               string "+=",
                                               space,
-                                              string "3, (*request == '/' ? *request++ = 0 : 0), NULL) : ((!strncmp(*request, \"Cons\", 4) && ((*request)[4] == 0 ",
+                                              string "3, ((*request)[0] == '/' ? ((*request)[0] = 0, ++*request) : NULL), NULL) : ((!strncmp(*request, \"Cons\", 4) && ((*request)[4] == 0 ",
                                               string "|| (*request)[4] == '/')) ? (*request",
                                               space,
                                               string "+=",
@@ -874,7 +903,7 @@ fun unurlify fromClient env (t, loc) =
 
                      box [string "unurlify_list_",
                           string (Int.toString i),
-                          string ("(ctx, &" ^ request ^ ")")])
+                          string ("(ctx, " ^ deStar request ^ ")")])
 
               | TOption t =>
                 box [string ("(" ^ request ^ "[0] == '/' ? ++" ^ request ^ " : " ^ request ^ ", "),
@@ -1032,6 +1061,22 @@ fun urlify env t =
                                             space,
                                             string "urlify_",
                                             string (Int.toString i),
+                                            string "(uw_context,",
+                                            space,
+                                            p_typ env t,
+                                            space,
+                                            if isUnboxable t then
+                                                box []
+                                            else
+                                                string "*",
+                                            string ");",
+                                            newline],
+                                       box [string "static",
+                                            space,
+                                            string "void",
+                                            space,
+                                            string "urlify_",
+                                            string (Int.toString i),
                                             string "(uw_context ctx,",
                                             space,
                                             p_typ env t,
@@ -1148,6 +1193,17 @@ fun urlify env t =
                                             space,
                                             string "urlify_",
                                             string (Int.toString i),
+                                            string "(uw_context,",
+                                            space,
+                                            p_typ env t,
+                                            string ");",
+                                            newline],
+                                       box [string "static",
+                                            space,
+                                            string "void",
+                                            space,
+                                            string "urlify_",
+                                            string (Int.toString i),
                                             string "(uw_context ctx,",
                                             space,
                                             p_typ env t,
@@ -1216,6 +1272,19 @@ fun urlify env t =
                 else
                     (urlifiesL := IS.add (!urlifiesL, i);
                      addUrlHandler (box [string "static",
+                                         space,
+                                         string "void",
+                                         space,
+                                         string "urlifyl_",
+                                         string (Int.toString i),
+                                         string "(uw_context,",
+                                         space,
+                                         string "struct __uws_",
+                                         string (Int.toString i),
+                                         space,
+                                         string "*);",
+                                         newline],
+                                    box [string "static",
                                          space,
                                          string "void",
                                          space,
@@ -2318,8 +2387,10 @@ fun p_file env (ds, ps) =
         val (pds, env) = ListUtil.foldlMap (fn (d, env) =>
                                                let
                                                    val d' = p_decl env d
+                                                   val hs = latestUrlHandlers ()
+                                                   val (protos, defs) = ListPair.unzip hs
                                                in
-                                                   (box (List.revAppend (latestUrlHandlers (), [d'])),
+                                                   (box (List.revAppend (protos, (List.revAppend (defs, [d'])))),
                                                     E.declBinds env d)
                                                end)
                              env ds
@@ -2637,6 +2708,10 @@ fun p_file env (ds, ps) =
                               newline]
             end
 
+        val timestamp = LargeInt.toString (Time.toMilliseconds (Time.now ()))
+        val app_js = OS.Path.joinDirFile {dir = Settings.getUrlPrefix (),
+                                          file = "app." ^ timestamp ^ ".js"}
+
         fun p_page (ek, s, n, ts, ran, side, tellSig) =
             let
                 val (ts, defInputs, inputsVar, fields) =
@@ -2756,8 +2831,7 @@ fun p_file env (ds, ps) =
                                                 let
                                                     val scripts =
                                                         "<script type=\\\"text/javascript\\\" src=\\\""
-                                                        ^ OS.Path.joinDirFile {dir = Settings.getUrlPrefix (),
-                                                                               file = "app.js"}
+                                                        ^ app_js
                                                         ^ "\\\"></script>\\n"
                                                 in
                                                     foldl (fn (x, scripts) =>
@@ -2840,7 +2914,8 @@ fun p_file env (ds, ps) =
                                                      in
                                                          (p', latestUrlHandlers () @ handlers)
                                                      end) [] ps
-                               
+        val (protos, defs) = ListPair.unzip handlers
+
         val hasDb = ref false
         val tables = ref []
         val views = ref []
@@ -3112,13 +3187,13 @@ fun p_file env (ds, ps) =
              newline,
              newline,
 
-             box (rev handlers),
+             box (rev protos),
+             box (rev defs),
 
              string "static void uw_handle(uw_context ctx, char *request) {",
              newline,
              string "if (!strcmp(request, \"",
-             string (OS.Path.joinDirFile {dir = Settings.getUrlPrefix (),
-                                          file = "app.js"}),
+             string app_js,
              string "\")) {",
              newline,
              box [string "uw_Basis_string ims = uw_Basis_requestHeader(ctx, \"If-modified-since\");",

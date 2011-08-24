@@ -1,4 +1,4 @@
-(* Copyright (c) 2008, Adam Chlipala
+(* Copyright (c) 2008-2011, Adam Chlipala
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -35,6 +35,12 @@ structure IS = IntBinarySet
 structure IM = IntBinaryMap
 
 structure E = CoreEnv
+
+fun multiLiftConInCon n c =
+    if n = 0 then
+        c
+    else
+        multiLiftConInCon (n - 1) (E.liftConInCon 0 c)
 
 fun multiLiftExpInExp n e =
     if n = 0 then
@@ -204,6 +210,28 @@ fun match (env, p : pat, e : exp) =
         match (env, p, e)
     end
 
+fun returnType m loc =
+    (TCFun ("a", (KType, loc),
+            (TFun ((CRel 0, loc),
+                   (CApp (multiLiftConInCon 1 m, (CRel 0, loc)), loc)), loc)), loc)
+
+fun bindType m loc =
+    (TCFun ("a", (KType, loc),
+            (TCFun ("b", (KType, loc),
+                    (TFun ((CApp (multiLiftConInCon 2 m, (CRel 1, loc)), loc),
+                           (TFun ((TFun ((CRel 1, loc),
+                                         (CApp (multiLiftConInCon 2 m, (CRel 0, loc)), loc)),
+                                   loc),
+                                  (CApp (multiLiftConInCon 2 m, (CRel 0, loc)), loc)), loc)),
+                     loc)), loc)), loc)
+
+fun monadRecord m loc =
+    (TRecord (CRecord ((KType, loc),
+                       [((CName "Return", loc),
+                         returnType m loc),
+                        ((CName "Bind", loc),
+                         bindType m loc)]), loc), loc)
+
 fun kindConAndExp (namedC, namedE) =
     let
         fun kind env (all as (k, loc)) =
@@ -273,10 +301,14 @@ fun kindConAndExp (namedC, namedE) =
                     (*print (Int.toString n ^ ": " ^ e2s env ^ "\n");*)
                     find (n, env, 0, 0, 0)
                 end
+
               | CNamed n =>
                 (case IM.find (namedC, n) of
                      NONE => all
                    | SOME c => c)
+
+              | CFfi ("Basis", "monad") => (CAbs ("m", (KArrow ((KType, loc), (KType, loc)), loc), monadRecord (CRel 0, loc) loc), loc)
+
               | CFfi _ => all
               | CApp (c1, c2) =>
                 let
@@ -371,6 +403,15 @@ fun kindConAndExp (namedC, namedE) =
                          else
                              ()*)
 
+                fun patBinds (p, _) =
+                    case p of
+                        PWild => 0
+                      | PVar _ => 1
+                      | PPrim _ => 0
+                      | PCon (_, _, _, NONE) => 0
+                      | PCon (_, _, _, SOME p) => patBinds p
+                      | PRecord xpts => foldl (fn ((_, p, _), n) => n + patBinds p) 0 xpts
+
                 val r = case e of
                             EPrim _ => all
                           | ERel n =>
@@ -406,6 +447,51 @@ fun kindConAndExp (namedC, namedE) =
                                | SOME e => e)
                           | ECon (dk, pc, cs, eo) => (ECon (dk, patCon pc,
                                                             map (con env) cs, Option.map (exp env) eo), loc)
+
+                          | EFfi ("Basis", "return") =>
+                            (ECAbs ("m", (KArrow ((KType, loc), (KType, loc)), loc),
+                                    (ECAbs ("a", (KType, loc),
+                                            (EAbs ("m", monadRecord (CRel 1, loc) loc, returnType (CRel 1, loc) loc,
+                                                   (ECApp ((EField ((ERel 0, loc), (CName "Return", loc),
+                                                                    {field = returnType (CRel 1, loc) loc,
+                                                                     rest = (CRecord ((KType, loc),
+                                                                                      [((CName "Bind", loc), bindType (CRel 1, loc) loc)]),
+                                                                             loc)}), loc), (CRel 0, loc)), loc)), loc)), loc)), loc)
+
+                          | EFfi ("Basis", "bind") =>
+                            (ECAbs ("m", (KArrow ((KType, loc), (KType, loc)), loc),
+                                    (ECAbs ("a", (KType, loc),
+                                            (ECAbs ("b", (KType, loc),
+                                                    (EAbs ("m", monadRecord (CRel 2, loc) loc, bindType (CRel 2, loc) loc,
+                                                           (ECApp ((ECApp ((EField ((ERel 0, loc), (CName "Bind", loc),
+                                                                                    {field = bindType (CRel 2, loc) loc,
+                                                                                     rest = (CRecord ((KType, loc),
+                                                                                                      [((CName "Return", loc),
+                                                                                                        returnType (CRel 2, loc) loc)]),
+                                                                                             loc)}), loc), (CRel 1, loc)), loc),
+                                                                  (CRel 0, loc)), loc)), loc)), loc)), loc)), loc)
+
+                          | EFfi ("Basis", "mkMonad") =>
+                            (ECAbs ("m", (KArrow ((KType, loc), (KType, loc)), loc),
+                                    (EAbs ("m", monadRecord (CRel 0, loc) loc, monadRecord (CRel 0, loc) loc,
+                                           (ERel 0, loc)), loc)), loc)
+
+                          | EFfi ("Basis", "transaction_monad") =>
+                            (ERecord [((CName "Return", loc),
+                                       (EFfi ("Basis", "transaction_return"), loc),
+                                       returnType (CFfi ("Basis", "transaction"), loc) loc),
+                                      ((CName "Bind", loc),
+                                       (EFfi ("Basis", "transaction_bind"), loc),
+                                       bindType (CFfi ("Basis", "transaction"), loc) loc)], loc)
+
+                          | EFfi ("Basis", "signal_monad") =>
+                            (ERecord [((CName "Return", loc),
+                                       (EFfi ("Basis", "signal_return"), loc),
+                                       returnType (CFfi ("Basis", "signal"), loc) loc),
+                                      ((CName "Bind", loc),
+                                       (EFfi ("Basis", "signal_bind"), loc),
+                                       bindType (CFfi ("Basis", "signal"), loc) loc)], loc)
+
                           | EFfi _ => all
                           | EFfiApp (m, f, es) => (EFfiApp (m, f, map (exp env) es), loc)
 
@@ -458,6 +544,20 @@ fun kindConAndExp (namedC, namedE) =
                                                                ("r", CorePrint.p_exp CoreEnv.empty r)];*)
                                         r
                                     end
+                                  | ECase (e, pes, cc as {disc, result = res as (TFun (_, c2), _)}) =>
+                                    let
+                                        val pes' = map (fn (p, body) =>
+                                                           let
+                                                               val env' = List.tabulate (patBinds p, fn _ => UnknownE) @ deKnown env
+                                                               val body' = exp env' (EApp (body, multiLiftExpInExp (patBinds p) e2), #2 body)
+                                                           in
+                                                               (p, body')
+                                                           end) pes
+
+                                        val cc' = {disc = disc, result = c2}
+                                    in
+                                        (ECase (e, pes', cc'), loc)
+                                    end
                                   | _ => (EApp (e1, e2), loc)
                             end
 
@@ -479,6 +579,22 @@ fun kindConAndExp (namedC, namedE) =
                                                                ("c", CorePrint.p_con CoreEnv.empty c),
                                                                ("r", CorePrint.p_exp CoreEnv.empty r)];*)
                                         r
+                                    end
+                                  | ECase (e, pes, cc as {disc, result = res as (TCFun (_, _, c'), _)}) =>
+                                    let
+                                        val pes' = map (fn (p, body) =>
+                                                        let
+                                                            val env' = List.tabulate (patBinds p, fn _ => UnknownE) @ deKnown env
+
+                                                            val body' = exp env' (ECApp (body, c), #2 body)
+                                                        in
+                                                            (p, body')
+                                                        end) pes
+
+                                        val c' = E.subConInCon (0, c) c'
+                                        val cc' = {disc = disc, result = c'}
+                                    in
+                                        (ECase (e, pes', cc'), loc)
                                     end
                                   | _ => (ECApp (e, c), loc)
                             end
@@ -611,15 +727,6 @@ fun kindConAndExp (namedC, namedE) =
 
                           | ECase (e, pes, {disc, result}) =>
                             let
-                                fun patBinds (p, _) =
-                                    case p of
-                                        PWild => 0
-                                      | PVar _ => 1
-                                      | PPrim _ => 0
-                                      | PCon (_, _, _, NONE) => 0
-                                      | PCon (_, _, _, SOME p) => patBinds p
-                                      | PRecord xpts => foldl (fn ((_, p, _), n) => n + patBinds p) 0 xpts
-
                                 fun pat (all as (p, loc)) =
                                     case p of
                                         PWild => all

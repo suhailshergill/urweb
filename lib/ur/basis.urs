@@ -668,12 +668,15 @@ val url : transaction page -> url
 val effectfulUrl : (option queryString -> transaction page) -> url
 val redirect : t ::: Type -> url -> transaction t
 
+type id
+val fresh : transaction id
+
 val dyn : ctx ::: {Unit} -> use ::: {Type} -> bind ::: {Type} -> [ctx ~ body] => unit
           -> tag [Signal = signal (xml (body ++ ctx) use bind)] (body ++ ctx) [] use bind
 
 val head : unit -> tag [] html head [] []
 val title : unit -> tag [] head [] [] []
-val link : unit -> tag [Id = string, Rel = string, Typ = string, Href = url, Media = string] head [] [] []
+val link : unit -> tag [Id = id, Rel = string, Typ = string, Href = url, Media = string] head [] [] []
 
 val body : unit -> tag [Onload = transaction unit, Onresize = transaction unit, Onunload = transaction unit]
                        html body [] []
@@ -686,7 +689,7 @@ con bodyTagStandalone = fn (attrs :: {Type}) =>
                            -> [[Body] ~ ctx] =>
                                  unit -> tag attrs ([Body] ++ ctx) [] [] []
 
-val br : bodyTagStandalone [Id = int]
+val br : bodyTagStandalone [Id = id]
 
 con focusEvents = [Onblur = transaction unit, Onfocus = transaction unit]
 con mouseEvents = [Onclick = transaction unit, Ondblclick = transaction unit,
@@ -701,8 +704,8 @@ con resizeEvents = [Onresize = transaction unit]
 con boxEvents = focusEvents ++ mouseEvents ++ keyEvents ++ resizeEvents
 con tableEvents = focusEvents ++ mouseEvents ++ keyEvents
 
-con boxAttrs = [Id = string, Title = string] ++ boxEvents
-con tableAttrs = [Id = string, Title = string] ++ tableEvents
+con boxAttrs = [Id = id, Title = string] ++ boxEvents
+con tableAttrs = [Id = id, Title = string] ++ tableEvents
 
 val span : bodyTag boxAttrs
 val div : bodyTag boxAttrs
@@ -727,7 +730,7 @@ val ul : bodyTag boxAttrs
 
 val hr : bodyTag boxAttrs
 
-val a : bodyTag ([Link = transaction page, Href = url] ++ boxAttrs)
+val a : bodyTag ([Link = transaction page, Href = url, Target = string] ++ boxAttrs)
 
 val img : bodyTag ([Alt = string, Src = url, Width = int, Height = int,
                     Onabort = transaction unit, Onerror = transaction unit,
@@ -789,7 +792,7 @@ val postType : postBody -> string
 val postData : postBody -> string
 
 con radio = [Body, Radio]
-val radio : formTag string radio [Id = string]
+val radio : formTag string radio [Id = id]
 val radioOption : unit -> tag ([Value = string, Checked = bool] ++ boxAttrs) radio [] [] []
 
 con select = [Select]
@@ -808,7 +811,7 @@ val image : ctx ::: {Unit} -> use ::: {Type}
                    -> tag ([Src = url, Width = int, Height = int, Alt = string, Action = $use -> transaction page] ++ boxAttrs)
                           ([Form] ++ ctx) ([Form] ++ ctx) use []
 
-val label : bodyTag ([For = string, Accesskey = string] ++ tableAttrs)
+val label : bodyTag ([For = id, Accesskey = string] ++ tableAttrs)
 
 
 (*** AJAX-oriented widgets *)
@@ -857,6 +860,20 @@ val onFail : (string -> transaction unit) -> transaction unit
 val onConnectFail : transaction unit -> transaction unit
 val onDisconnect : transaction unit -> transaction unit
 val onServerError : (string -> transaction unit) -> transaction unit
+
+(* More standard document-level JavaScript handlers *)
+val onClick : transaction unit -> transaction unit
+val onDblclick : transaction unit -> transaction unit
+val onKeydown : (int -> transaction unit) -> transaction unit
+val onKeypress : (int -> transaction unit) -> transaction unit
+val onKeyup : (int -> transaction unit) -> transaction unit
+val onMousedown : transaction unit -> transaction unit
+val onMouseup : transaction unit -> transaction unit
+
+(* Prevents default handling of current event *)
+val preventDefault : transaction unit
+(* Stops propagation of current event *)
+val stopPropagation : transaction unit
 
 val show_xml : ctx ::: {Unit} -> use ::: {Type} -> bind ::: {Type} -> show (xml ctx use bind)
 

@@ -16,7 +16,7 @@
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
  * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR 
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
  * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
  * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
  * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
@@ -52,7 +52,7 @@ fun setUrlPrefix p =
                     ("", prefix)
                 else
                     (String.substring (prefix, 0, n) ^ Substring.string befor, Substring.string after)
-            end            
+            end
 
         val (prepre, prefix) =
             if String.isPrefix "http://" prefix then
@@ -164,8 +164,7 @@ val benign = ref benignBase
 fun setBenignEffectful ls = benign := S.addList (benignBase, ls)
 fun isBenignEffectful x = S.member (!benign, x)
 
-val clientBase = basis ["get",
-                        "set",
+val clientBase = basis ["get_client_source",
                         "current",
                         "alert",
                         "confirm",
@@ -205,6 +204,9 @@ fun isServerOnly x = S.member (!server, x)
 val basisM = foldl (fn ((k, v : string), m) => M.insert (m, ("Basis", k), v)) M.empty
 
 val jsFuncsBase = basisM [("alert", "alert"),
+                          ("stringToTime", "stringToTime"),
+                          ("stringToTime_error", "stringToTime_error"),
+                          ("timef", "strftime"),
                           ("confirm", "confrm"),
                           ("get_client_source", "sg"),
                           ("current", "scur"),
@@ -269,6 +271,11 @@ val jsFuncsBase = basisM [("alert", "alert"),
 
                           ("debug", "alert"),
                           ("naughtyDebug", "alert"),
+
+                          ("floatFromInt", "float"),
+                          ("ceil", "ceil"),
+                          ("trunc", "trunc"),
+                          ("round", "round"),
 
                           ("now", "now"),
                           ("timeToString", "showTime"),

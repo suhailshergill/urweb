@@ -1,4 +1,4 @@
-AC_INIT([urweb], [20110917])
+AC_INIT([urweb], [20111127])
 WORKING_VERSION=1
 AC_USE_SYSTEM_EXTENSIONS
 AM_INIT_AUTOMAKE([-Wall -Werror foreign no-define])

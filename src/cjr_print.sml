@@ -1090,7 +1090,13 @@ fun urlify env t =
                                             box [string "if (it0) {",
                                                  newline,
                                                  if isUnboxable t then
-                                                     urlify' 0 t
+                                                     box [string "uw_write(ctx, \"",
+                                                          string has_arg,
+                                                          string "/\");",
+                                                          newline,
+                                                          urlify' 0 t,
+                                                          string ";",
+                                                          newline]
                                                  else
                                                      box [p_typ env t,
                                                           space,
@@ -2814,7 +2820,7 @@ fun p_file env (ds, ps) =
                      box (case ek of
                               Core.Rpc _ => [string "uw_write_header(ctx, \"Content-type: text/plain\\r\\n\");",
                                              newline]
-                            | _ => [string "uw_write_header(ctx, \"Content-type: text/html\\r\\n\");",
+                            | _ => [string "uw_write_header(ctx, \"Content-type: text/html; charset=utf-8\\r\\n\");",
                                     newline,
                                     string "uw_write_header(ctx, \"Content-script-type: text/javascript\\r\\n\");",
                                     newline,

@@ -47,6 +47,11 @@ export.sml
 
 source.sml
 
+utf8.sig
+utf8.sml
+
+../xml/entities.sml
+
 urweb.grm
 urweb.lex
 
@@ -183,6 +188,9 @@ jscomp.sml
 
 pathcheck.sig
 pathcheck.sml
+
+sidecheck.sig
+sidecheck.sml
 
 cjr.sml
 

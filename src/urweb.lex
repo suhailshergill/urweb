@@ -113,6 +113,14 @@ fun initialize () = (xmlTag := [];
 		     xmlString := false)
 
 
+structure StringMap = BinaryMapFn(struct
+                                  type ord_key = string
+                                  val compare = String.compare
+                                  end)
+
+val entities = foldl (fn ((key, value), entities) => StringMap.insert (entities, key, value))
+                     StringMap.empty Entities.all
+
 fun unescape loc s =
     let
         fun process (s, acc) =
@@ -141,20 +149,16 @@ fun unescape loc s =
                                         let
                                             val code = Substring.string (Substring.slice (code, 1, NONE))
                                         in
-                                            Option.map chr (Int.fromString code)
+                                            Option.map Utf8.encode (Int.fromString code)
                                         end
-                                    else case Substring.string code of
-                                             "amp" => SOME #"&"
-                                           | "lt" => SOME #"<"
-                                           | "gt" => SOME #">"
-                                           | "quot" => SOME #"\""
-                                           | _ => NONE
+                                    else
+                                        Option.map Utf8.encode (StringMap.find (entities, Substring.string code))
                             in
                                 case special of
                                     NONE => (ErrorMsg.errorAt' loc ("Unsupported XML character entity "
                                                                         ^ Substring.string code);
                                              "")
-                                  | SOME ch => process (s, Substring.full (String.str ch) :: pre :: acc)
+                                  | SOME sp => process (s, Substring.full sp :: pre :: acc)
                             end
                     end
             end
@@ -416,7 +420,7 @@ xint = x[0-9a-fA-F][0-9a-fA-F];
 <INITIAL> "structure" => (Tokens.STRUCTURE (pos yypos, pos yypos + size yytext));
 <INITIAL> "signature" => (Tokens.SIGNATURE (pos yypos, pos yypos + size yytext));
 <INITIAL> "struct"    => (Tokens.STRUCT (pos yypos, pos yypos + size yytext));
-<INITIAL> "sig"       => (if yypos = 2 then initialSig () else (); Tokens.SIG (pos yypos, pos yypos + size yytext));
+<INITIAL> "sig"       => (if yypos <= 2 then initialSig () else (); Tokens.SIG (pos yypos, pos yypos + size yytext));
 <INITIAL> "let"       => (Tokens.LET (pos yypos, pos yypos + size yytext));
 <INITIAL> "in"        => (Tokens.IN (pos yypos, pos yypos + size yytext));
 <INITIAL> "end"       => (Tokens.END (pos yypos, pos yypos + size yytext));
@@ -480,6 +484,10 @@ xint = x[0-9a-fA-F][0-9a-fA-F];
 <INITIAL> "MIN"       => (Tokens.MIN (pos yypos, pos yypos + size yytext));
 <INITIAL> "MAX"       => (Tokens.MAX (pos yypos, pos yypos + size yytext));
 
+<INITIAL> "IF"        => (Tokens.CIF (pos yypos, pos yypos + size yytext));
+<INITIAL> "THEN"      => (Tokens.CTHEN (pos yypos, pos yypos + size yytext));
+<INITIAL> "ELSE"      => (Tokens.CELSE (pos yypos, pos yypos + size yytext));
+
 <INITIAL> "ASC"       => (Tokens.ASC (pos yypos, pos yypos + size yytext));
 <INITIAL> "DESC"      => (Tokens.DESC (pos yypos, pos yypos + size yytext));
 
@@ -491,6 +499,8 @@ xint = x[0-9a-fA-F][0-9a-fA-F];
 <INITIAL> "DELETE"    => (Tokens.DELETE (pos yypos, pos yypos + size yytext));
 <INITIAL> "NULL"      => (Tokens.NULL (pos yypos, pos yypos + size yytext));
 <INITIAL> "IS"        => (Tokens.IS (pos yypos, pos yypos + size yytext));
+<INITIAL> "COALESCE"  => (Tokens.COALESCE (pos yypos, pos yypos + size yytext));
+<INITIAL> "LIKE"      => (Tokens.LIKE (pos yypos, pos yypos + size yytext));
 
 <INITIAL> "CONSTRAINT"=> (Tokens.CCONSTRAINT (pos yypos, pos yypos + size yytext));
 <INITIAL> "UNIQUE"    => (Tokens.UNIQUE (pos yypos, pos yypos + size yytext));

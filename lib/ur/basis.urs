@@ -145,6 +145,14 @@ val signal : t ::: Type -> source t -> signal t
 val current : t ::: Type -> signal t -> transaction t
 
 
+(** * Floats *)
+
+val float : int -> float
+val ceil : float -> int
+val trunc : float -> int
+val round : float -> int
+
+
 (** * Time *)
 
 val now : transaction time
@@ -466,6 +474,19 @@ val sql_is_null : tables ::: {{Type}} -> agg ::: {{Type}} -> exps ::: {Type}
                   -> sql_exp tables agg exps (option t)
                   -> sql_exp tables agg exps bool
 
+val sql_coalesce : tables ::: {{Type}} -> agg ::: {{Type}} -> exps ::: {Type}
+                  -> t ::: Type
+                  -> sql_exp tables agg exps (option t)
+                  -> sql_exp tables agg exps t
+                  -> sql_exp tables agg exps t
+
+val sql_if_then_else : tables ::: {{Type}} -> agg ::: {{Type}} -> exps ::: {Type}
+                       -> t ::: Type
+                       -> sql_exp tables agg exps bool
+                       -> sql_exp tables agg exps t
+                       -> sql_exp tables agg exps t
+                       -> sql_exp tables agg exps t
+
 class sql_arith
 val sql_arith_int : sql_arith int
 val sql_arith_float : sql_arith float
@@ -501,6 +522,8 @@ val sql_lt : t ::: Type -> sql_binary t t bool
 val sql_le : t ::: Type -> sql_binary t t bool
 val sql_gt : t ::: Type -> sql_binary t t bool
 val sql_ge : t ::: Type -> sql_binary t t bool
+
+val sql_like : sql_binary string string bool
 
 val sql_count : tables ::: {{Type}} -> agg ::: {{Type}} -> exps ::: {Type}
                 -> sql_exp tables agg exps int
@@ -602,6 +625,8 @@ val setval : sql_sequence -> int -> transaction unit
 
 type css_class
 val show_css_class : show css_class
+val null : css_class
+(* No special formatting *)
 val classes : css_class -> css_class -> css_class
 (* The equivalent of writing one class after the other, separated by a space, in
  * an HTML 'class' attribute *)

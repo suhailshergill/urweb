@@ -1,4 +1,4 @@
-(* Copyright (c) 2008-2010, Adam Chlipala
+(* Copyright (c) 2008-2011, Adam Chlipala
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -347,20 +347,34 @@ fun institutionalizeJob (job : job) =
      Settings.setMinHeap (#minHeap job);
      Settings.setSigFile (#sigFile job))
 
+datatype commentableLine =
+         EndOfFile
+       | OnlyComment
+       | Content of string
+
 fun inputCommentableLine inf =
-    Option.map (fn s =>
-                   let
-                       val s = #1 (Substring.splitl (fn ch => ch <> #"#") (Substring.full s))
-                       val s = #1 (Substring.splitr (not o Char.isSpace) s)
-                   in
-                       Substring.string (if Substring.size s > 0 andalso Char.isSpace (Substring.sub (s, Substring.size s - 1)) then
-                                             if Substring.size s > 1 andalso Char.isSpace (Substring.sub (s, Substring.size s - 2)) then
-                                                 Substring.trimr 2 s
-                                             else
-                                                 Substring.trimr 1 s
-                                         else
-                                             s)
-                   end) (TextIO.inputLine inf)
+    case TextIO.inputLine inf of
+        NONE => EndOfFile
+      | SOME s =>
+        let
+            val (befor, after) = Substring.splitl (fn ch => ch <> #"#") (Substring.full s)
+        in
+            if not (Substring.isEmpty after)
+               andalso Substring.foldl (fn (ch, b) => b andalso Char.isSpace ch) true befor then
+                OnlyComment
+            else
+                let
+                    val s = #1 (Substring.splitr (not o Char.isSpace) befor)
+                in
+                    Content (Substring.string (if Substring.size s > 0 andalso Char.isSpace (Substring.sub (s, Substring.size s - 1)) then
+                                                   if Substring.size s > 1 andalso Char.isSpace (Substring.sub (s, Substring.size s - 2)) then
+                                                       Substring.trimr 2 s
+                                                   else
+                                                       Substring.trimr 1 s
+                                               else
+                                                   s))
+                end
+        end
 
 fun parseUrp' accLibs fname =
     if not (Posix.FileSys.access (fname ^ ".urp", []) orelse Posix.FileSys.access (fname ^ "/lib.urp", []))
@@ -417,9 +431,10 @@ fun parseUrp' accLibs fname =
 
                     fun hasSpaceLine () =
                         case inputCommentableLine inf of
-                            NONE => false
-                          | SOME s => s = "debug" orelse s = "profile"
-                                      orelse CharVector.exists (fn ch => ch = #" " orelse ch = #"\t") s orelse hasSpaceLine ()
+                            Content s => s = "debug" orelse s = "profile"
+                                         orelse CharVector.exists (fn ch => ch = #" " orelse ch = #"\t") s orelse hasSpaceLine ()
+                          | EndOfFile => false
+                          | OnlyComment => hasSpaceLine ()
 
                     val hasBlankLine = hasSpaceLine ()
 
@@ -467,8 +482,7 @@ fun parseUrp' accLibs fname =
 
                     fun readSources acc =
                         case inputCommentableLine inf of
-                            NONE => rev acc
-                          | SOME line =>
+                            Content line =>
                             let
                                 val acc = if CharVector.all Char.isSpace line then
                                               acc
@@ -483,6 +497,8 @@ fun parseUrp' accLibs fname =
                             in
                                 readSources acc
                             end
+                          | OnlyComment => readSources acc
+                          | EndOfFile => rev acc
 
                     val prefix = ref (case Settings.getUrlPrefix () of "/" => NONE | s => SOME s)
                     val database = ref (Settings.getDbstring ())
@@ -639,9 +655,10 @@ fun parseUrp' accLibs fname =
 
                     fun read () =
                         case inputCommentableLine inf of
-                            NONE => finish []
-                          | SOME "" => finish (readSources [])
-                          | SOME line =>
+                            EndOfFile => finish []
+                          | OnlyComment => read ()
+                          | Content "" => finish (readSources [])
+                          | Content line =>
                             let
                                 val (cmd, arg) = Substring.splitl (fn x => not (Char.isSpace x)) (Substring.full line)
                                 val cmd = Substring.string (trim cmd)
@@ -1274,12 +1291,19 @@ val pathcheck = {
 
 val toPathcheck = transform pathcheck "pathcheck" o toMono_shake3
 
+val sidecheck = {
+    func = SideCheck.check,
+    print = MonoPrint.p_file MonoEnv.empty
+}
+
+val toSidecheck = transform sidecheck "sidecheck" o toPathcheck
+
 val cjrize = {
     func = Cjrize.cjrize,
     print = CjrPrint.p_file CjrEnv.empty
 }
 
-val toCjrize = transform cjrize "cjrize" o toPathcheck
+val toCjrize = transform cjrize "cjrize" o toSidecheck
 
 val scriptcheck = {
     func = ScriptCheck.classify,

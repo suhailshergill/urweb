@@ -1,6 +1,6 @@
 \documentclass{article}
 \usepackage{fullpage,amsmath,amssymb,proof,url}
-
+\usepackage[T1]{fontenc}
 \newcommand{\cd}[1]{\texttt{#1}}
 \newcommand{\mt}[1]{\mathsf{#1}}
 
@@ -107,7 +107,7 @@ Change the path in the first line if you chose a different Emacs installation pa
 
 \section{Command-Line Compiler}
 
-\subsection{Project Files}
+\subsection{\label{cl}Project Files}
 
 The basic inputs to the \texttt{urweb} compiler are project files, which have the extension \texttt{.urp}.  Here is a sample \texttt{.urp} file.
 
@@ -380,7 +380,7 @@ $$\begin{array}{rrcll}
   &&& \{\kappa\} & \textrm{type-level records} \\
   &&& (\kappa\times^+) & \textrm{type-level tuples} \\
   &&& X & \textrm{variable} \\
-  &&& X \longrightarrow k & \textrm{kind-polymorphic type-level function} \\
+  &&& X \longrightarrow \kappa & \textrm{kind-polymorphic type-level function} \\
   &&& \_\_ & \textrm{wildcard} \\
   &&& (\kappa) & \textrm{explicit precedence} \\
 \end{array}$$
@@ -426,7 +426,7 @@ $$\begin{array}{rrcll}
   &&& M.x & \textrm{projection from a module} \\
 \end{array}$$
 
-We include both abstraction and application for kind polymorphism, but applications are only inferred internally; they may not be written explicitly in source programs.
+We include both abstraction and application for kind polymorphism, but applications are only inferred internally; they may not be written explicitly in source programs.  Also, in the ``known-length type-level record'' form, in $c_1 = c_2$ terms, the parser currently only allows $c_1$ to be of the forms $X$ (as a shorthand for $\#X$) or $x$, or a natural number to stand for the corresponding field name (e.g., for tuples).
 
 Modules of the module system are described by \emph{signatures}.
 $$\begin{array}{rrcll}
@@ -517,7 +517,7 @@ $$\begin{array}{rrcll}
   &&& \mt{constraint} \; c \sim c & \textrm{record disjointness constraint} \\
   &&& \mt{open} \; \mt{constraints} \; M & \textrm{inclusion of just the constraints from a module} \\
   &&& \mt{table} \; x : c & \textrm{SQL table} \\
-  &&& \mt{view} \; x : c & \textrm{SQL view} \\
+  &&& \mt{view} \; x = e & \textrm{SQL view} \\
   &&& \mt{sequence} \; x & \textrm{SQL sequence} \\
   &&& \mt{cookie} \; x : \tau & \textrm{HTTP cookie} \\
   &&& \mt{style} \; x : \tau & \textrm{CSS class} \\
@@ -533,7 +533,7 @@ $$\begin{array}{rrcll}
 
 There are two kinds of Ur files.  A file named $M\texttt{.ur}$ is an \emph{implementation file}, and it should contain a sequence of declarations $d^*$.  A file named $M\texttt{.urs}$ is an \emph{interface file}; it must always have a matching $M\texttt{.ur}$ and should contain a sequence of signature items $s^*$.  When both files are present, the overall effect is the same as a monolithic declaration $\mt{structure} \; M : \mt{sig} \; s^* \; \mt{end} = \mt{struct} \; d^* \; \mt{end}$.  When no interface file is included, the overall effect is similar, with a signature for module $M$ being inferred rather than just checked against an interface.
 
-We omit some extra possibilities in $\mt{table}$ syntax, deferring them to Section \ref{tables}.
+We omit some extra possibilities in $\mt{table}$ syntax, deferring them to Section \ref{tables}.  The concrete syntax of $\mt{view}$ declarations is also more complex than shown in the table above, with details deferred to Section \ref{tables}.
 
 \subsection{Shorthands}
 
@@ -548,6 +548,8 @@ The notation $[c_1, \ldots, c_n]$ is shorthand for $[c_1 = (), \ldots, c_n = ()]
 A tuple type $\tau_1 \times \ldots \times \tau_n$ expands to a record type $\{1 : \tau_1, \ldots, n : \tau_n\}$, with natural numbers as field names.  A tuple expression $(e_1, \ldots, e_n)$ expands to a record expression $\{1 = e_1, \ldots, n = e_n\}$.  A tuple pattern $(p_1, \ldots, p_n)$ expands to a rigid record pattern $\{1 = p_1, \ldots, n = p_n\}$.  Positive natural numbers may be used in most places where field names would be allowed.
 
 In general, several adjacent $\lambda$ forms may be combined into one, and kind and type annotations may be omitted, in which case they are implicitly included as wildcards.  More formally, for constructor-level abstractions, we can define a new non-terminal $b ::= x \mid (x :: \kappa) \mid X$ and allow composite abstractions of the form $\lambda b^+ \Rightarrow c$, elaborating into the obvious sequence of one core $\lambda$ per element of $b^+$.
+
+Further, the signature item or declaration syntax $\mt{con} \; x \; b^+ = c$ is shorthand for wrapping of the appropriate $\lambda$s around the righthand side $c$.  The $b$ elements may not include $X$, and there may also be an optional $:: \kappa$ before the $=$.
 
 In some contexts, the parser isn't happy with token sequences like $x :: \_$, to indicate a constructor variable of wildcard kind.  In such cases, write the second two tokens as $::\hspace{-.05in}\_$, with no intervening spaces.  Analogous syntax $:::\hspace{-.05in}\_$ is available for implicit constructor arguments.
 
@@ -983,8 +985,8 @@ $$\infer{\Gamma \vdash \mt{constraint} \; c_1 \sim c_2 \leadsto \Gamma}{
 $$\infer{\Gamma \vdash \mt{table} \; x : c \leadsto \Gamma, x : \mt{Basis}.\mt{sql\_table} \; c \; []}{
   \Gamma \vdash c :: \{\mt{Type}\}
 }
-\quad \infer{\Gamma \vdash \mt{view} \; x : c \leadsto \Gamma, x : \mt{Basis}.\mt{sql\_view} \; c}{
-  \Gamma \vdash c :: \{\mt{Type}\}
+\quad \infer{\Gamma \vdash \mt{view} \; x = e \leadsto \Gamma, x : \mt{Basis}.\mt{sql\_view} \; c}{
+  \Gamma \vdash e :: \mt{Basis}.\mt{sql\_query} \; [] \; [] \; (\mt{map} \; (\lambda \_ \Rightarrow []) \; c') \; c
 }$$
 
 $$\infer{\Gamma \vdash \mt{sequence} \; x \leadsto \Gamma, x : \mt{Basis}.\mt{sql\_sequence}}{}$$
@@ -1219,7 +1221,7 @@ $$\infer{\Gamma \vdash M_1(M_2) : [X \mapsto M_2]S_2}{
   \mt{sigOf}(\mt{constraint} \; c_1 \sim c_2) &=& \mt{constraint} \; c_1 \sim c_2 \\
   \mt{sigOf}(\mt{open} \; \mt{constraints} \; M) &=& \cdot \\
   \mt{sigOf}(\mt{table} \; x : c) &=& \mt{table} \; x : c \\
-  \mt{sigOf}(\mt{view} \; x : c) &=& \mt{view} \; x : c \\
+  \mt{sigOf}(\mt{view} \; x = e) &=& \mt{view} \; x : c \textrm{ (where $\Gamma \vdash e : \mt{Basis}.\mt{sql\_query} \; [] \; [] \; (\mt{map} \; (\lambda \_ \Rightarrow []) \; c') \; c$)} \\
   \mt{sigOf}(\mt{sequence} \; x) &=& \mt{sequence} \; x \\
   \mt{sigOf}(\mt{cookie} \; x : \tau) &=& \mt{cookie} \; x : \tau \\
   \mt{sigOf}(\mt{style} \; x) &=& \mt{style} \; x \\
@@ -1707,6 +1709,15 @@ $$\begin{array}{l}
   \hspace{.1in} \to \mt{sql\_exp} \; \mt{tables} \; \mt{agg} \; \mt{exps} \; (\mt{option} \; \mt{t}) \to \mt{sql\_exp} \; \mt{tables} \; \mt{agg} \; \mt{exps} \; \mt{bool}
 \end{array}$$
 
+As another way of dealing with null values, there is also a restricted form of the standard \cd{COALESCE} function.
+$$\begin{array}{l}
+  \mt{val} \; \mt{sql\_coalesce} : \mt{tables} ::: \{\{\mt{Type}\}\} \to \mt{agg} ::: \{\{\mt{Type}\}\} \to \mt{exps} ::: \{\mt{Type}\} \\
+  \hspace{.1in} \to \mt{t} ::: \mt{Type} \\
+  \hspace{.1in} \to \mt{sql\_exp} \; \mt{tables} \; \mt{agg} \; \mt{exps} \; (\mt{option} \; \mt{t}) \\
+  \hspace{.1in} \to \mt{sql\_exp} \; \mt{tables} \; \mt{agg} \; \mt{exps} \; \mt{t} \\
+  \hspace{.1in} \to \mt{sql\_exp} \; \mt{tables} \; \mt{agg} \; \mt{exps} \; \mt{t}
+\end{array}$$
+
 We have generic nullary, unary, and binary operators.
 $$\begin{array}{l}
   \mt{con} \; \mt{sql\_nfunc} :: \mt{Type} \to \mt{Type} \\
@@ -1781,6 +1792,15 @@ Any SQL query that returns single columns may be turned into a subquery expressi
 $$\begin{array}{l}
 \mt{val} \; \mt{sql\_subquery} : \mt{tables} ::: \{\{\mt{Type}\}\} \to \mt{agg} ::: \{\{\mt{Type}\}\} \to \mt{exps} ::: \{\mt{Type}\} \to \mt{nm} ::: \mt{Name} \to \mt{t} ::: \mt{Type} \to \mt{nt} ::: \mt{Type} \\
 \hspace{.1in} \to \mt{nullify} \; \mt{t} \; \mt{nt} \to \mt{sql\_query} \; \mt{tables} \; \mt{agg} \; [\mt{nm} = \mt{t}] \to \mt{sql\_exp} \; \mt{tables} \; \mt{agg} \; \mt{exps} \; \mt{nt}
+\end{array}$$
+
+There is also an \cd{IF..THEN..ELSE..} construct that is compiled into standard SQL \cd{CASE} expressions.
+$$\begin{array}{l}
+\mt{val} \; \mt{sql\_if\_then\_else} : \mt{tables} ::: \{\{\mt{Type}\}\} \to \mt{agg} ::: \{\{\mt{Type}\}\} \to \mt{exps} ::: \{\mt{Type}\} \to \mt{t} ::: \mt{Type} \\
+\hspace{.1in} \to \mt{sql\_exp} \; \mt{tables} \; \mt{agg} \; \mt{exps} \; \mt{bool} \\
+\hspace{.1in} \to \mt{sql\_exp} \; \mt{tables} \; \mt{agg} \; \mt{exps} \; \mt{t} \\
+\hspace{.1in} \to \mt{sql\_exp} \; \mt{tables} \; \mt{agg} \; \mt{exps} \; \mt{t} \\
+\hspace{.1in} \to \mt{sql\_exp} \; \mt{tables} \; \mt{agg} \; \mt{exps} \; \mt{t}
 \end{array}$$
 
 \texttt{FROM} clauses are specified using a type family, whose arguments are the free table variables and the table variables bound by this clause.
@@ -1859,14 +1879,14 @@ $$\begin{array}{l}
   \hspace{.1in} \to \$(\mt{map} \; (\mt{sql\_exp} \; [] \; [] \; []) \; \mt{fields}) \to \mt{dml}
 \end{array}$$
 
-An $\mt{UPDATE}$ command is formed from a choice of which table fields to leave alone and which to change, along with an expression to use to compute the new value of each changed field and a $\mt{WHERE}$ clause.
+An $\mt{UPDATE}$ command is formed from a choice of which table fields to leave alone and which to change, along with an expression to use to compute the new value of each changed field and a $\mt{WHERE}$ clause.  Note that, in the table environment applied to expressions, the table being updated is hardcoded at the name $\mt{T}$.  The parsing extension for $\mt{UPDATE}$ will elaborate all table-free field references to use table variable $\mt{T}$.
 $$\begin{array}{l}
   \mt{val} \; \mt{update} : \mt{unchanged} ::: \{\mt{Type}\} \to \mt{changed} :: \{\mt{Type}\} \to [\mt{changed} \sim \mt{unchanged}] \\
   \hspace{.1in} \Rightarrow \$(\mt{map} \; (\mt{sql\_exp} \; [\mt{T} = \mt{changed} \rc \mt{unchanged}] \; [] \; []) \; \mt{changed}) \\
   \hspace{.1in} \to \mt{sql\_table} \; (\mt{changed} \rc \mt{unchanged}) \to \mt{sql\_exp} \; [\mt{T} = \mt{changed} \rc \mt{unchanged}] \; [] \; [] \; \mt{bool} \to \mt{dml}
 \end{array}$$
 
-A $\mt{DELETE}$ command is formed from a table and a $\mt{WHERE}$ clause.
+A $\mt{DELETE}$ command is formed from a table and a $\mt{WHERE}$ clause.  The above use of $\mt{T}$ is repeated.
 $$\begin{array}{l}
   \mt{val} \; \mt{delete} : \mt{fields} ::: \{\mt{Type}\} \to \mt{sql\_table} \; \mt{fields} \to \mt{sql\_exp} \; [\mt{T} = \mt{fields}] \; [] \; [] \; \mt{bool} \to \mt{dml}
 \end{array}$$
@@ -2017,12 +2037,13 @@ $$\begin{array}{l}
 
 Only source creation and setting are supported server-side, as a convenience to help in setting up a page, where you may wish to allocate many sources that will be referenced through the page.  All server-side storage of values inside sources uses string serializations of values, while client-side storage uses normal JavaScript values.
 
-Pure functions over arbitrary numbers of sources are represented in a monad of \emph{signals}, which may only be used in client-side code.  This is presented to the programmer in the form of a monad $\mt{signal}$, each of whose values represents (conceptually) some pure function over all sources that may be allocated in the course of program execution.  A monad operation $\mt{signal}$ denotes the identity function over a particular source.  By using $\mt{signal}$ on a source, you implicitly subscribe to change notifications for that source.  That is, your signal will automatically be recomputed as that source changes.  The usual monad operators make it possible to build up complex signals that depend on multiple sources; automatic updating upon source-value changes still happens automatically.
+Pure functions over arbitrary numbers of sources are represented in a monad of \emph{signals}, which may only be used in client-side code.  This is presented to the programmer in the form of a monad $\mt{signal}$, each of whose values represents (conceptually) some pure function over all sources that may be allocated in the course of program execution.  A monad operation $\mt{signal}$ denotes the identity function over a particular source.  By using $\mt{signal}$ on a source, you implicitly subscribe to change notifications for that source.  That is, your signal will automatically be recomputed as that source changes.  The usual monad operators make it possible to build up complex signals that depend on multiple sources; automatic updating upon source-value changes still happens automatically.  There is also an operator for computing a signal's current value within a transaction.
 
 $$\begin{array}{l}
   \mt{con} \; \mt{signal} :: \mt{Type} \to \mt{Type} \\
   \mt{val} \; \mt{signal\_monad} : \mt{monad} \; \mt{signal} \\
-  \mt{val} \; \mt{signal} : \mt{t} ::: \mt{Type} \to \mt{source} \; \mt{t} \to \mt{signal} \; \mt{t}
+  \mt{val} \; \mt{signal} : \mt{t} ::: \mt{Type} \to \mt{source} \; \mt{t} \to \mt{signal} \; \mt{t} \\
+  \mt{val} \; \mt{current} : \mt{t} ::: \mt{Type} \to \mt{signal} \; \mt{t} \to \mt{transaction} \; \mt{t}
 \end{array}$$
 
 A reactive portion of an HTML page is injected with a $\mt{dyn}$ tag, which has a signal-valued attribute $\mt{Signal}$.
@@ -2077,14 +2098,15 @@ Ur/Web features some syntactic shorthands for building values using the function
 
 $\mt{table}$ declarations may include constraints, via these grammar rules.
 $$\begin{array}{rrcll}
-  \textrm{Declarations} & d &::=& \mt{table} \; x : c \; [pk[,]] \; cts \\
+  \textrm{Declarations} & d &::=& \mt{table} \; x : c \; [pk[,]] \; cts \mid \mt{view} \; x = V \\
   \textrm{Primary key constraints} & pk &::=& \mt{PRIMARY} \; \mt{KEY} \; K \\
   \textrm{Keys} & K &::=& f \mid (f, (f,)^+) \\
   \textrm{Constraint sets} & cts &::=& \mt{CONSTRAINT} f \; ct \mid cts, cts \mid \{\{e\}\} \\
   \textrm{Constraints} & ct &::=& \mt{UNIQUE} \; K \mid \mt{CHECK} \; E \\
   &&& \mid \mt{FOREIGN} \; \mt{KEY} \; K \; \mt{REFERENCES} \; F \; (K) \; [\mt{ON} \; \mt{DELETE} \; pr] \; [\mt{ON} \; \mt{UPDATE} \; pr] \\
   \textrm{Foreign tables} & F &::=& x \mid \{\{e\}\} \\
-  \textrm{Propagation modes} & pr &::=& \mt{NO} \; \mt{ACTION} \mid \mt{RESTRICT} \mid \mt{CASCADE} \mid \mt{SET} \; \mt{NULL}
+  \textrm{Propagation modes} & pr &::=& \mt{NO} \; \mt{ACTION} \mid \mt{RESTRICT} \mid \mt{CASCADE} \mid \mt{SET} \; \mt{NULL} \\
+  \textrm{View expressions} & V &::=& Q \mid \{e\}
 \end{array}$$
 
 A signature item $\mt{table} \; \mt{x} : \mt{c}$ is actually elaborated into two signature items: $\mt{con} \; \mt{x\_hidden\_constraints} :: \{\{\mt{Unit}\}\}$ and $\mt{val} \; \mt{x} : \mt{sql\_table} \; \mt{c} \; \mt{x\_hidden\_constraints}$.  This is appropriate for common cases where client code doesn't care which keys a table has.  It's also possible to include constraints after a $\mt{table}$ signature item, with the same syntax as for $\mt{table}$ declarations.  This may look like dependent typing, but it's just a convenience.  The constraints are type-checked to determine a constructor $u$ to include in $\mt{val} \; \mt{x} : \mt{sql\_table} \; \mt{c} \; (u \rc \mt{x\_hidden\_constraints})$, and then the expressions are thrown away.  Nonetheless, it can be useful for documentation purposes to include table constraint details in signatures.  Note that the automatic generation of $\mt{x\_hidden\_constraints}$ leads to a kind of free subtyping with respect to which constraints are defined.
@@ -2120,7 +2142,7 @@ $$\begin{array}{rrcll}
   &&& \mid (Q) \; \mt{AS} \; t \\
   \textrm{Joins} & J &::=& [\mt{INNER}] \\
   &&& \mid [\mt{LEFT} \mid \mt{RIGHT} \mid \mt{FULL}] \; [\mt{OUTER}] \\
-  \textrm{SQL expressions} & E &::=& p & \textrm{column references} \\
+  \textrm{SQL expressions} & E &::=& t.f & \textrm{column references} \\
   &&& X & \textrm{named expression references} \\
   &&& \{[e]\} & \textrm{injected native Ur expressions} \\
   &&& \{e\} & \textrm{computed expressions, probably using $\mt{sql\_exp}$ directly} \\
@@ -2128,11 +2150,13 @@ $$\begin{array}{rrcll}
   &&& \ell & \textrm{primitive type literals} \\
   &&& \mt{NULL} & \textrm{null value (injection of $\mt{None}$)} \\
   &&& E \; \mt{IS} \; \mt{NULL} & \textrm{nullness test} \\
+  &&& \mt{COALESCE}(E, E) & \textrm{take first non-null value} \\
   &&& n & \textrm{nullary operators} \\
   &&& u \; E & \textrm{unary operators} \\
   &&& E \; b \; E & \textrm{binary operators} \\
   &&& \mt{COUNT}(\ast) & \textrm{count number of rows} \\
   &&& a(E) & \textrm{other aggregate function} \\
+  &&& \mt{IF} \; E \; \mt{THEN} \; E \; \mt{ELSE} \; E & \textrm{conditional} \\
   &&& (Q) & \textrm{subquery (must return a single expression column)} \\
   &&& (E) & \textrm{explicit precedence} \\
   \textrm{Nullary operators} & n &::=& \mt{CURRENT\_TIMESTAMP} \\
@@ -2181,7 +2205,7 @@ $$\begin{array}{rrcll}
 
 \section{\label{structure}The Structure of Web Applications}
 
-A web application is built from a series of modules, with one module, the last one appearing in the \texttt{.urp} file, designated as the main module.  The signature of the main module determines the URL entry points to the application.  Such an entry point should have type $\mt{t1} \to \ldots \to \mt{tn} \to \mt{transaction} \; \mt{page}$, for any integer $n \geq 0$, where $\mt{page}$ is a type synonym for top-level HTML pages, defined in $\mt{Basis}$.  If such a function is at the top level of main module $M$, with $n = 0$, it will be accessible at URI \texttt{/M/f}, and so on for more deeply-nested functions, as described in Section \ref{tag} below.  Arguments to an entry-point function are deserialized from the part of the URI following \texttt{f}.
+A web application is built from a series of modules, with one module, the last one appearing in the \texttt{.urp} file, designated as the main module.  The signature of the main module determines the URL entry points to the application.  Such an entry point should have type $\mt{t1} \to \ldots \to \mt{tn} \to \mt{transaction} \; \mt{page}$, for any integer $n \geq 0$, where $\mt{page}$ is a type synonym for top-level HTML pages, defined in $\mt{Basis}$.  If such a function is at the top level of main module $M$, with $n = 0$, it will be accessible at URI \texttt{/M/f}, and so on for more deeply-nested functions, as described in Section \ref{tag} below.  See Section \ref{cl} for information on the \texttt{prefix} and \texttt{rewrite url} directives, which can be used to rewrite the default URIs of different entry point functions.  The final URL of a function is its default module-based URI, with \texttt{rewrite url} rules applied, and with the \texttt{prefix} prepended.  Arguments to an entry-point function are deserialized from the part of the URI following \texttt{f}.
 
 Elements of modules beside the main module, including page handlers, will only be included in the final application if they are transitive dependencies of the handlers in the main module.
 

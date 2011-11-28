@@ -150,7 +150,8 @@ See doc for the variable `urweb-mode-info'."
                  "ASC" "DESC" "INSERT" "INTO" "VALUES" "UPDATE" "SET" "DELETE"
                  "PRIMARY" "KEY" "CONSTRAINT" "UNIQUE" "CHECK"
                  "FOREIGN" "REFERENCES" "ON" "NO" "ACTION" "CASCADE" "RESTRICT" "NULL"
-                 "JOIN" "INNER" "OUTER" "LEFT" "RIGHT" "FULL" "CROSS" "SELECT1")
+                 "JOIN" "INNER" "OUTER" "LEFT" "RIGHT" "FULL" "CROSS" "SELECT1"
+                 "IF" "THEN" "ELSE" "COALESCE" "LIKE")
   "A regexp that matches SQL keywords.")
 
 (defconst urweb-lident-regexp "\\<[a-z_][A-Za-z0-9_']*\\>"
@@ -170,7 +171,7 @@ See doc for the variable `urweb-mode-info'."
           (finished nil)
           (answer nil)
           )
-      (while (and (not finished) (re-search-backward "[<{}]" nil t))
+      (while (and (not finished) (re-search-backward "[-<{}]" nil t))
         (cond
          ((looking-at "{")
           (if (> depth 0)
@@ -185,7 +186,26 @@ See doc for the variable `urweb-mode-info'."
               (setq answer t)
               (setq finished t))))
          ((looking-at "</xml>")
-          (incf depth))))
+          (incf depth))
+
+         ((looking-at "-")
+          (if (looking-at "->")
+            (setq finished (= depth 0))))
+
+         ((and (= depth 0)
+               (not (looking-at "<xml")) ;; ignore <xml/>
+               (eq font-lock-tag-face
+                   (get-text-property (point) 'face)))
+          ;; previous code was highlighted as tag, seems we are in xml
+          (progn
+            (setq answer t)
+            (setq finished t)))
+
+         ((= depth 0)
+          ;; previous thing was a tag like, but not tag
+          ;; seems we are in usual code or comment
+          (setq finished t))
+         ))
       answer)))
 
 (defun amAttribute (face)

@@ -310,6 +310,8 @@ fun process file =
 
               | TFfi ("Basis", "bool") => ("t[i++] == \"1\"", st)
 
+              | TSource => ("parseSource(t[i++], t[i++])", st)
+
               | TOption t =>
                 let
                     val (e, st) = unurlifyExp loc (t, st)
@@ -706,6 +708,8 @@ fun process file =
                                              | "*" => "times"
                                              | "/" => (case bi of Int => "divInt" | NotInt => "div")
                                              | "%" => (case bi of Int => "modInt" | NotInt => "mod")
+                                             | "fdiv" => "div"
+                                             | "fmod" => "mod"
                                              | "<" => "lt"
                                              | "<=" => "le"
                                              | "strcmp" => "strcmp"
@@ -1320,6 +1324,7 @@ fun process file =
         val script =
             if !foundJavaScript then
                 lines ^ urlRules ^ String.concat (rev (#script st))
+                ^ "\ntime_format = \"" ^ String.toCString (Settings.getTimeFormat ()) ^ "\";\n"
             else
                 ""
     in

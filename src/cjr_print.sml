@@ -112,6 +112,42 @@ fun p_typ' par env (t, loc) =
 
 and p_typ env = p_typ' false env
 
+fun p_htyp' par env (t, loc) =
+    case t of
+        TFun (t1, t2) => parenIf par (box [p_htyp' true env t1,
+                                           space,
+                                           string "->",
+                                           space,
+                                           p_htyp' true env t2])
+      | TRecord i =>
+        let
+            val xts = E.lookupStruct env i
+        in
+            box [string "{",
+                 p_list (fn (x, t) =>
+                            box [string x,
+                                 space,
+                                 string ":",
+                                 space,
+                                 p_htyp env t]) xts,
+                 string "}"]
+        end
+      | TDatatype (_, n, _) =>
+        let
+            val (name, _) = E.lookupDatatype env n
+        in
+            string name
+        end
+      | TFfi (m, x) => string (m ^ "." ^ x)
+      | TOption t => parenIf par (box [string "option",
+                                       space,
+                                       p_htyp' true env t])
+      | TList (t, _) => parenIf par (box [string "list",
+                                          space,
+                                          p_htyp' true env t])
+
+and p_htyp env = p_htyp' false env
+
 fun p_rel env n = string ("__uwr_" ^ ident (#1 (E.lookupERel env n)) ^ "_" ^ Int.toString (E.countERels env - n - 1))
     handle CjrEnv.UnboundRel _ => string ("__uwr_UNBOUND_" ^ Int.toString (E.countERels env - n - 1))
 
@@ -388,7 +424,7 @@ fun p_unsql wontLeakStrings env (tAll as (t, loc)) e eLen =
       | TFfi ("Basis", "client") => box [string "uw_Basis_stringToClient_error(ctx, ", e, string ")"]
 
       | _ => (ErrorMsg.errorAt loc "Don't know how to unmarshal type from SQL";
-              Print.eprefaces' [("Type", p_typ env tAll)];
+              Print.eprefaces' [("Type", p_htyp env tAll)];
               string "ERROR")
 
 fun p_getcol wontLeakStrings env (tAll as (t, loc)) i =
@@ -640,13 +676,19 @@ fun unurlify fromClient env (t, loc) =
                               | [(has_arg, _, SOME t), (no_arg, _, NONE)] =>
                                 (no_arg, has_arg, t)
                               | _ => raise Fail "CjrPrint: unfooify misclassified Option datatype"
+
+                        val unboxable = isUnboxable t
                     in
                         unurlifies := IS.add (!unurlifies, i);
                         addUrlHandler (box [string "static",
                                             space,
                                             p_typ env t,
                                             space,
-                                            string "*unurlify_",
+                                            if unboxable then
+                                                box []
+                                            else
+                                                string "*",
+                                            string "unurlify_",
                                             string (Int.toString i),
                                             string "(uw_context, char **);",
                                             newline],
@@ -654,7 +696,11 @@ fun unurlify fromClient env (t, loc) =
                                             space,
                                             p_typ env t,
                                             space,
-                                            string "*unurlify_",
+                                            if unboxable then
+                                                box []
+                                            else
+                                                string "*",
+                                            string "unurlify_",
                                             string (Int.toString i),
                                             string "(uw_context ctx, char **request) {",
                                             newline,
@@ -689,7 +735,7 @@ fun unurlify fromClient env (t, loc) =
                                                  string ", ((*request)[0] == '/' ? ++*request : NULL), ",
                                                  newline,
                                                  
-                                                 if isUnboxable  t then
+                                                 if unboxable then
                                                      unurlify' "(*request)" (#1 t)
                                                  else
                                                      box [string "({",
@@ -1362,7 +1408,7 @@ fun sql_type_in env (tAll as (t, loc)) =
       | TFfi ("Basis", "client") => Client
       | TOption t' => Nullable (sql_type_in env t')
       | _ => (ErrorMsg.errorAt loc "Don't know SQL equivalent of type";
-              Print.eprefaces' [("Type", p_typ env tAll)];
+              Print.eprefaces' [("Type", p_htyp env tAll)];
               Int)
 
 fun potentiallyFancy (e, _) =
@@ -1655,7 +1701,7 @@ fun p_exp' par tail env (e, loc) =
                           p_exp' true false env e1])
 
       | EBinop (s, e1, e2) =>
-        if Char.isAlpha (String.sub (s, size s - 1)) then
+        if s <> "fdiv" andalso Char.isAlpha (String.sub (s, size s - 1)) then
             box [string s,
                  string "(",
                  p_exp' false false env e1,
@@ -1663,10 +1709,48 @@ fun p_exp' par tail env (e, loc) =
                  space,
                  p_exp' false false env e2,
                  string ")"]
+        else if s = "/" orelse s = "%" then
+            box [string "({",
+                 newline,
+                 string "uw_Basis_int",
+                 space,
+                 string "dividend",
+                 space,
+                 string "=",
+                 space,
+                 p_exp env e1,
+                 string ",",
+                 space,
+                 string "divisor",
+                 space,
+                 string "=",
+                 space,
+                 p_exp env e2,
+                 string ";",
+                 newline,
+                 string "if",
+                 space,
+                 string "(divisor",
+                 space,
+                 string "==",
+                 space,
+                 string "0)",
+                 newline,
+                 box [string "uw_error(ctx, FATAL, \"",
+                      string (ErrorMsg.spanToString loc),
+                      string ": division by zero\");",
+                      newline],
+                 string "dividend",
+                 space,
+                 string s,
+                 space,
+                 string "divisor;",
+                 newline,
+                 string "})"]
         else
             parenIf par (box [p_exp' true false env e1,
                               space,
-                              string s,
+                              string (if s = "fdiv" then "/" else s),
                               space,
                               p_exp' true false env e2])
 
@@ -2340,7 +2424,7 @@ fun p_sqltype'' env (tAll as (t, loc)) =
       | TFfi ("Basis", "channel") => "int8"
       | TFfi ("Basis", "client") => "int4"
       | _ => (ErrorMsg.errorAt loc "Don't know SQL equivalent of type";
-              Print.eprefaces' [("Type", p_typ env tAll)];
+              Print.eprefaces' [("Type", p_htyp env tAll)];
               "ERROR")
 
 fun p_sqltype' env (tAll as (t, loc)) =
@@ -2931,19 +3015,20 @@ fun p_file env (ds, ps) =
         val initialize = ref 0
         val prepped = ref []
 
-        val () = app (fn d =>
-                         case #1 d of
-                             DDatabase {name = x, expunge = y, initialize = z} => (hasDb := true;
-                                                                                   dbstring := x;
-                                                                                   expunge := y;
-                                                                                   initialize := z)
-                           | DTable (s, xts, _, _) => tables := (s, map (fn (x, t) =>
-                                                                            (x, sql_type_in env t)) xts) :: !tables
-                           | DView (s, xts, _) => views := (s, map (fn (x, t) =>
-                                                                       (x, sql_type_in env t)) xts) :: !views
-                           | DSequence s => sequences := s :: !sequences
-                           | DPreparedStatements ss => prepped := ss
-                           | _ => ()) ds
+        val _ = foldl (fn (d, env) =>
+                          ((case #1 d of
+                                DDatabase {name = x, expunge = y, initialize = z} => (hasDb := true;
+                                                                                      dbstring := x;
+                                                                                      expunge := y;
+                                                                                      initialize := z)
+                              | DTable (s, xts, _, _) => tables := (s, map (fn (x, t) =>
+                                                                               (x, sql_type_in env t)) xts) :: !tables
+                              | DView (s, xts, _) => views := (s, map (fn (x, t) =>
+                                                                          (x, sql_type_in env t)) xts) :: !views
+                              | DSequence s => sequences := s :: !sequences
+                              | DPreparedStatements ss => prepped := ss
+                              | _ => ());
+                           E.declBinds env d)) E.empty ds
 
         val hasDb = !hasDb
 
@@ -3316,7 +3401,8 @@ fun p_file env (ds, ps) =
                          "uw_db_init", "uw_db_begin", "uw_db_commit", "uw_db_rollback", "uw_db_close",
                          "uw_handle",
                          "uw_input_num", "uw_cookie_sig", "uw_check_url", "uw_check_mime", "uw_check_requestHeader", "uw_check_responseHeader",
-                         case onError of NONE => "NULL" | SOME _ => "uw_onError", "my_periodics"],
+                         case onError of NONE => "NULL" | SOME _ => "uw_onError", "my_periodics",
+                         "\"" ^ String.toCString (Settings.getTimeFormat ()) ^ "\""],
              string "};",
              newline]
     end

@@ -500,7 +500,7 @@ fun parseUrp' accLibs fname =
                           | OnlyComment => readSources acc
                           | EndOfFile => rev acc
 
-                    val prefix = ref (case Settings.getUrlPrefix () of "/" => NONE | s => SOME s)
+                    val prefix = ref (case Settings.getUrlPrefixFull () of "/" => NONE | s => SOME s)
                     val database = ref (Settings.getDbstring ())
                     val exe = ref (Settings.getExe ())
                     val sql = ref (Settings.getSql ())
@@ -580,7 +580,16 @@ fun parseUrp' accLibs fname =
                                                         x))
 
                             fun merge (old : job, new : job) = {
-                                prefix = #prefix old,
+                                prefix = case #prefix old of
+                                             "/" => #prefix new
+                                           | pold => case #prefix new of
+                                                         "/" => pold
+                                                       | pnew => (if pold = pnew then
+                                                                      ()
+                                                                  else
+                                                                      ErrorMsg.error ("Multiple prefix values that don't agree: "
+                                                                                      ^ pold ^ ", " ^ pnew);
+                                                                  pold),
                                 database = mergeO (fn (old, _) => old) (#database old, #database new),
                                 exe = #exe old,
                                 sql = #sql old,
@@ -799,6 +808,7 @@ fun parseUrp' accLibs fname =
                                        | SOME n => minHeap := n)
                                   | "alwaysInline" => Settings.addAlwaysInline arg
                                   | "noXsrfProtection" => Settings.addNoXsrfProtection arg
+                                  | "timeFormat" => Settings.setTimeFormat arg
 
                                   | _ => ErrorMsg.error ("Unrecognized command '" ^ cmd ^ "'");
                                 read ()

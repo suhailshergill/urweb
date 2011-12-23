@@ -27,12 +27,14 @@
 
 structure Settings :> SETTINGS = struct
 
+val urlPrefixFull = ref "/"
 val urlPrefix = ref "/"
 val urlPrePrefix = ref ""
 val timeout = ref 0
 val headers = ref ([] : string list)
 val scripts = ref ([] : string list)
 
+fun getUrlPrefixFull () = !urlPrefixFull
 fun getUrlPrefix () = !urlPrefix
 fun getUrlPrePrefix () = !urlPrePrefix
 fun setUrlPrefix p =
@@ -62,6 +64,7 @@ fun setUrlPrefix p =
             else
                 ("", prefix)
     in
+        urlPrefixFull := p;
         urlPrePrefix := prepre;
         urlPrefix := prefix
     end
@@ -143,7 +146,6 @@ val benignBase = basis ["get_cookie",
                         "onServerError",
                         "kc",
                         "debug",
-                        "naughtyDebug",
                         "rand",
                         "now",
                         "getHeader",
@@ -248,6 +250,7 @@ val jsFuncsBase = basisM [("alert", "alert"),
                           ("strchr", "schr"),
                           ("substring", "ssub"),
                           ("strcspn", "sspn"),
+                          ("strlenGe", "strlenGe"),
                           ("kc", "kc"),
                           ("minTime", "0"),
 
@@ -269,8 +272,8 @@ val jsFuncsBase = basisM [("alert", "alert"),
                           ("lt_time", "lt"),
                           ("le_time", "le"),
 
-                          ("debug", "alert"),
-                          ("naughtyDebug", "alert"),
+                          ("debug", "uw_debug"),
+                          ("naughtyDebug", "uw_debug"),
 
                           ("floatFromInt", "float"),
                           ("ceil", "ceil"),
@@ -279,7 +282,7 @@ val jsFuncsBase = basisM [("alert", "alert"),
 
                           ("now", "now"),
                           ("timeToString", "showTime"),
-                          ("htmlifyTime", "showTime"),
+                          ("htmlifyTime", "showTimeHtml"),
                           ("toSeconds", "toSeconds"),
                           ("addSeconds", "addSeconds"),
                           ("diffInSeconds", "diffInSeconds"),
@@ -619,5 +622,9 @@ fun checkAlwaysInline s = SS.member (!alwaysInline, s)
 val noXsrfProtection = ref SS.empty
 fun addNoXsrfProtection s = noXsrfProtection := SS.add (!noXsrfProtection, s)
 fun checkNoXsrfProtection s = SS.member (!noXsrfProtection, s)
+
+val timeFormat = ref "%c"
+fun setTimeFormat v = timeFormat := v
+fun getTimeFormat () = !timeFormat
 
 end

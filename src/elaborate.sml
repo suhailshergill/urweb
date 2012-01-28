@@ -865,7 +865,13 @@
 
          val (unifs1, unifs2) = eatMatching (fn ((_, r1), (_, r2)) => r1 = r2) (#unifs s1, #unifs s2)
 
-         val (others1, others2) = eatMatching (consEq env loc) (#others s1, #others s2)
+         val hasUnifs = U.Con.exists {kind = fn _ => false,
+                                      con = fn L'.CUnif _ => true
+                                             | _ => false}
+
+         val (others1, others2) = eatMatching (fn (c1, c2) =>
+                                                  not (hasUnifs c1 andalso hasUnifs c2)
+                                                  andalso consEq env loc (c1, c2)) (#others s1, #others s2)
          (*val () = eprefaces "Summaries3" [("#1", p_summary env {fields = fs1, unifs = unifs1, others = others1}),
                                           ("#2", p_summary env {fields = fs2, unifs = unifs2, others = others2})]*)
 
@@ -1182,16 +1188,19 @@
                | (_, L'.CProj (c2, n2)) => projSpecial2 (c2, n2, isRecord')
                | _ => isRecord' ()
      in
-         (*eprefaces "unifyCons''" [("c1All", p_con env c1All),
-                                  ("c2All", p_con env c2All)];*)
+         (*eprefaces "unifyCons''" [("c1", p_con env c1All),
+                                  ("c2", p_con env c2All)];*)
 
-         case (c1, c2) of
+         (case (c1, c2) of
              (L'.CError, _) => ()
            | (_, L'.CError) => ()
 
            | (L'.CUnif (nl1, loc1, k1, _, r1 as ref (L'.Unknown f1)), L'.CUnif (nl2, loc2, k2, _, r2 as ref (L'.Unknown f2))) =>
-             if r1 = r2 andalso nl1 = nl2 then
-                 ()
+             if r1 = r2 then
+                 if nl1 = nl2 then
+                     ()
+                 else
+                     err (fn _ => TooLifty (loc1, loc2))
              else if nl1 = 0 then
                  (unifyKinds env k1 k2;
                   if f1 c2All then
@@ -1329,7 +1338,9 @@
            | (L'.TKFun (x, c1), L'.TKFun (_, c2)) =>
              unifyCons' (E.pushKRel env x) loc c1 c2
 
-           | _ => err CIncompatible
+           | _ => err CIncompatible)(*;
+        eprefaces "/unifyCons''" [("c1", p_con env c1All),
+                                  ("c2", p_con env c2All)]*)
      end
 
  and unifyCons env loc c1 c2 =
@@ -3004,7 +3015,7 @@ and subSgn' counterparts env strLoc sgn1 (sgn2 as (_, loc2)) =
 
             fun folder (sgi2All as (sgi, loc), env) =
                 let
-                    (*val () = prefaces "folder" [("sgis1", p_sgn env (L'.SgnConst sgis1, loc2))]*)
+                    (*val () = prefaces "folder" [("sgi2", p_sgn_item env sgi2All)]*)
 
                     fun seek' f p =
                         let
@@ -3639,6 +3650,30 @@ and wildifyStr env (str, sgn) =
 
                  val nd = removeUsed (nd, ds)
 
+                 (* Among the declarations present explicitly in the program, find the last constructor or constraint declaration.
+                  * The new constructor/constraint declarations that we add may safely be put after that point. *)
+                 fun findLast (ds, acc) =
+                     case ds of
+                         [] => ([], acc)
+                       | (d : L.decl) :: ds' =>
+                         let
+                             val isCony = case #1 d of
+                                              L.DCon _ => true
+                                            | L.DDatatype _ => true
+                                            | L.DDatatypeImp _ => true
+                                            | L.DStr _ => true
+                                            | L.DConstraint _ => true
+                                            | L.DClass _ => true
+                                            | _ => false
+                         in
+                             if isCony then
+                                 (ds, acc)
+                             else
+                                 findLast (ds', d :: acc)
+                         end
+
+                 val (dPrefix, dSuffix) = findLast (rev ds, [])
+
                  fun extend (env, nd, ds) =
                      let
                          val ds' = List.mapPartial (fn (env', (c1, c2), loc) =>
@@ -3684,7 +3719,7 @@ and wildifyStr env (str, sgn) =
                                | d => d) ds
                      end
              in
-                 (L.StrConst (extend (env, nd, ds)), #2 str)
+                 (L.StrConst (extend (env, nd, rev dPrefix) @ dSuffix), #2 str)
              end
            | _ => str)
       | _ => str
@@ -4466,7 +4501,6 @@ fun elabFile basis topStr topSgn env file =
                 val () = resetCunif ()
                 val (ds, (env', _, gs)) = elabDecl (d, (env, D.empty, gs))
             in
-                                    (**)
                 (ds, (env', gs))
             end
 

@@ -138,13 +138,13 @@ fun summarize file =
                       | ECon (_, _, _, NONE) => ([], classes)
                       | ECon (_, _, _, SOME e) => exp (e, classes)
                       | EFfi _ => ([], classes)
-                      | EFfiApp (_, _, es) => expList (es, classes)
+                      | EFfiApp (_, _, es) => expList (map #1 es, classes)
 
                       | EApp (
                         (EApp (
                          (EApp (
                           (EApp (
-                           (ECApp (
+                           (EApp (
                             (ECApp (
                              (ECApp (
                               (ECApp (
@@ -152,9 +152,11 @@ fun summarize file =
                                 (ECApp (
                                  (ECApp (
                                   (ECApp (
-                                   (EFfi ("Basis", "tag"),
-                                    _), _), _), _), _), _), _), _), _), _), _), _), _), _), _), _), _),
-                           (ECon (_, _, _, SOME (ENamed class, _)), _)), _),
+                                   (ECApp (
+                                    (EFfi ("Basis", "tag"),
+                                     _), _), _), _), _), _), _), _), _), _), _), _), _), _), _), _), _),
+                            (ECon (_, _, _, SOME (ENamed class, _)), _)), _),
+                           _), _),
                           attrs), _),
                          tag), _),
                         xml) =>
@@ -182,7 +184,7 @@ fun summarize file =
                         (EApp (
                          (EApp (
                           (EApp (
-                           (ECApp (
+                           (EApp (
                             (ECApp (
                              (ECApp (
                               (ECApp (
@@ -190,8 +192,10 @@ fun summarize file =
                                 (ECApp (
                                  (ECApp (
                                   (ECApp (
-                                   (EFfi ("Basis", "tag"),
-                                    _), _), _), _), _), _), _), _), _), _), _), _), _), _), _), _), _),
+                                   (ECApp (
+                                    (EFfi ("Basis", "tag"),
+                                     _), _), _), _), _), _), _), _), _), _), _), _), _), _), _), _), _),
+                            _), _),
                            _), _),
                           attrs), _),
                          tag), _),

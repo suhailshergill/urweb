@@ -159,8 +159,13 @@ typedef struct client {
 static client **clients, *clients_free, *clients_used;
 static unsigned n_clients;
 
-static pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
-
+static pthread_mutex_t clients_mutex =
+    #ifdef PTHREAD_RECURSIVE_MUTEX_INITIALIZER
+        PTHREAD_RECURSIVE_MUTEX_INITIALIZER
+    #else
+        PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP
+    #endif
+    ;
 size_t uw_messages_max = SIZE_MAX;
 size_t uw_clients_max = SIZE_MAX;
 
@@ -177,9 +182,10 @@ static client *new_client() {
     c = clients_free;
     clients_free = clients_free->next;
   }
-  else if (n_clients >= uw_clients_max)
+  else if (n_clients >= uw_clients_max) {
+    pthread_mutex_unlock(&clients_mutex);
     return NULL;
-  else {
+  } else {
     ++n_clients;
     clients = realloc(clients, sizeof(client) * n_clients);
     c = malloc(sizeof(client));
@@ -333,11 +339,7 @@ static void client_send(client *c, uw_buffer *msg, const char *script, int scrip
     c->send(c->sock, msg->start, uw_buffer_used(msg));
     c->close(c->sock);
     c->sock = -1;
-  } else if ((script_len > 0
-              && (c->send(c->sock, "E\n", 2)
-                  || c->send(c->sock, script, script_len)
-                  || c->send(c->sock, "\n", 1)))
-             || uw_buffer_append(&c->msgs, msg->start, uw_buffer_used(msg)))
+  } else if (uw_buffer_append(&c->msgs, msg->start, uw_buffer_used(msg)))
     fprintf(stderr, "Client message buffer size exceeded");
 
   pthread_mutex_unlock(&c->lock);
@@ -1318,6 +1320,12 @@ const char *uw_Basis_get_script(uw_context ctx, uw_unit u) {
 }
 
 const char *uw_get_real_script(uw_context ctx) {
+  if (strstr(ctx->outHeaders.start, "Set-Cookie: ")) {
+    uw_write_script(ctx, "sig=\"");
+    uw_write_script(ctx, ctx->app->cookie_sig(ctx));
+    uw_write_script(ctx, "\";");
+  }
+
   return ctx->script.start;
 }
 

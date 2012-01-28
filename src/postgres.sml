@@ -337,7 +337,7 @@ fun init {dbstring, prepared = ss, tables, views, sequences} =
                                                   box [string "res = PQprepare(conn, \"uw",
                                                        string (Int.toString i),
                                                        string "\", \"",
-                                                       string (String.toCString s),
+                                                       string (Prim.toCString s),
                                                        string "\", ",
                                                        string (Int.toString n),
                                                        string ", NULL);",
@@ -355,7 +355,7 @@ fun init {dbstring, prepared = ss, tables, views, sequences} =
                                                             string "PQfinish(conn);",
                                                             newline,
                                                             string "uw_error(ctx, FATAL, \"Unable to create prepared statement:\\n",
-                                                            string (String.toCString s),
+                                                            string (Prim.toCString s),
                                                             string "\\n%s\", msg);",
                                                             newline],
                                                        string "}",
@@ -481,7 +481,7 @@ fun init {dbstring, prepared = ss, tables, views, sequences} =
          string "char *env_db_str = getenv(\"URWEB_PQ_CON\");",
 	 newline,
          string "PGconn *conn = PQconnectdb(env_db_str == NULL ? \"",
-         string (String.toCString dbstring),
+         string (Prim.toCString dbstring),
          string "\" : env_db_str);",
          newline,
          string "if (conn == NULL) uw_error(ctx, FATAL, ",
@@ -680,7 +680,7 @@ fun makeParams inputs =
          string " };",
          newline,
          if List.exists isBlob inputs then
-             box [string "const int *paramLengths = uw_malloc(ctx, ",
+             box [string "int *paramLengths = uw_malloc(ctx, ",
                   string (Int.toString (length inputs)),
                   string " * sizeof(int));",
                   newline,
@@ -696,7 +696,6 @@ fun makeParams inputs =
                                                  | _ => string "0",
                                                string ";",
                                                newline]) inputs,
-                  string " };",
                   newline]
          else
              box [string "const int *paramLengths = paramFormats;",
@@ -733,14 +732,14 @@ fun queryPrepared {loc, id, query, inputs, cols, doCols, nested = _} =
                   string ", paramValues, paramLengths, paramFormats, 0);"]
          else
              box [string "PQexecParams(conn, \"",
-                  string (String.toCString query),
+                  string (Prim.toCString query),
                   string "\", ",
                   string (Int.toString (length inputs)),
                   string ", NULL, paramValues, paramLengths, paramFormats, 0);"],
          newline,
          newline,
          queryCommon {loc = loc, cols = cols, doCols = doCols, query = box [string "\"",
-                                                                            string (String.toCString query),
+                                                                            string (Prim.toCString query),
                                                                             string "\""]}]
 
 fun dmlCommon {loc, dml, mode} =
@@ -889,14 +888,14 @@ fun dmlPrepared {loc, id, dml, inputs, mode} =
                   string ", paramValues, paramLengths, paramFormats, 0);"]
          else
              box [string "PQexecParams(conn, \"",
-                  string (String.toCString dml),
+                  string (Prim.toCString dml),
                   string "\", ",
                   string (Int.toString (length inputs)),
                   string ", NULL, paramValues, paramLengths, paramFormats, 0);"],
          newline,
          newline,
          dmlCommon {loc = loc, dml = box [string "\"",
-                                          string (String.toCString dml),
+                                          string (Prim.toCString dml),
                                           string "\""], mode = mode}]
 
 fun nextvalCommon {loc, query} =
@@ -973,12 +972,12 @@ fun nextvalPrepared {loc, id, query} =
                   string "\", 0, NULL, NULL, NULL, 0);"]
          else
              box [string "PQexecParams(conn, \"",
-                  string (String.toCString query),
+                  string (Prim.toCString query),
                   string "\", 0, NULL, NULL, NULL, NULL, 0);"],
          newline,
          newline,
          nextvalCommon {loc = loc, query = box [string "\"",
-                                                string (String.toCString query),
+                                                string (Prim.toCString query),
                                                 string "\""]}]
 
 fun setvalCommon {loc, query} =
@@ -1031,7 +1030,7 @@ fun sqlifyString s = "E'" ^ String.translate (fn #"'" => "\\'"
                                                  else
                                                      "\\" ^ StringCvt.padLeft #"0" 3
                                                                               (Int.fmt StringCvt.OCT (ord ch)))
-                                             (String.toCString s) ^ "'::text"
+                                             (Prim.toCString s) ^ "'::text"
 
 fun p_cast (s, t) = s ^ "::" ^ p_sql_type t
 

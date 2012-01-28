@@ -11,6 +11,12 @@ table t : {Id : int, A : int, B : string, C : bool, D : int, E : option int, F :
 fun page (n, s) = return <xml>A = {[n]}, B = {[s]}</xml>
 
 open Make(struct
+              structure F = Direct.Foreign(struct
+                                               con nm = #Id
+                                               val tab = t1
+                                               fun render r = r.A
+                                           end)
+
               val tab = t
               con key = [Id = _]
 
@@ -28,12 +34,6 @@ open Make(struct
                               Inj = _},
                          F = {New = return None,
                               Inj = _}}
-
-              structure F = Direct.Foreign(struct
-                                               con nm = #Id
-                                               val tab = t1
-                                               fun render r = r.A
-                                           end)
 
               val cols = {Id = Direct.readOnly [#Id] "Id" Direct.int,
                           A = Direct.editable [#A] "A" Direct.int,

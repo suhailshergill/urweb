@@ -1,4 +1,4 @@
-AC_INIT([urweb], [20111127])
+AC_INIT([urweb], [20120110])
 WORKING_VERSION=1
 AC_USE_SYSTEM_EXTENSIONS
 AM_INIT_AUTOMAKE([-Wall -Werror foreign no-define])
@@ -119,6 +119,7 @@ Ur/Web configuration:
   Postgres C header:   PGHEADER       $PGHEADER
   MySQL C header:      MSHEADER       $MSHEADER
   SQLite C header:     SQHEADER       $SQHEADER
+  OpenSSL:             OPENSSL_LIBS   $OPENSSL_LIBS
 
   Version:             $VERSION
 EOF

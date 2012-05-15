@@ -44,6 +44,7 @@ type job = {
      timeout : int,
      ffi : string list,
      link : string list,
+     linker : string option,
      headers : string list,
      scripts : string list,
      clientToServer : Settings.ffi list,
@@ -325,9 +326,24 @@ structure M = BinaryMapFn(struct
                           val compare = String.compare
                           end)
 
-val pathmap = ref (M.insert (M.empty, "", Config.libUr))
+(* XXX ezyang: pathmap gets initialized /really early/, before
+ * we do any options parsing.  So libUr will always point to the
+ * default. We override it explicitly in enableBoot *)
+val pathmap = ref (M.insert (M.empty, "", Settings.libUr ()))
 
 fun addPath (k, v) = pathmap := M.insert (!pathmap, k, v)
+
+(* XXX ezyang: this is not right; it probably doesn't work in
+ * the case of separate build and src trees *)
+fun enableBoot () =
+ (Settings.configBin := OS.Path.joinDirFile {dir = Config.builddir, file = "bin"};
+  Settings.configSrcLib := OS.Path.joinDirFile {dir = Config.builddir, file = "lib"};
+  (* joinDirFile is annoying... (ArcError; it doesn't like
+   * slashes in file) *)
+  Settings.configLib := Config.builddir ^ "/src/c/.libs";
+  Settings.configInclude := OS.Path.joinDirFile {dir = Config.builddir ^ "/include", file = "urweb"};
+  Settings.configSitelisp := Config.builddir ^ "/src/elisp";
+  addPath ("", Settings.libUr ()))
 
 fun capitalize "" = ""
   | capitalize s = str (Char.toUpper (String.sub (s, 0))) ^ String.extract (s, 1, NONE)
@@ -399,6 +415,7 @@ fun parseUrp' accLibs fname =
                        timeout = 60,
                        ffi = [],
                        link = [],
+                       linker = NONE,
                        headers = [],
                        scripts = [],
                        clientToServer = [],
@@ -409,7 +426,8 @@ fun parseUrp' accLibs fname =
                        jsFuncs = [],
                        rewrites = [{pkind = Settings.Any,
                                     kind = Settings.Prefix,
-                                    from = capitalize (OS.Path.file fname) ^ "/", to = ""}],
+                                    from = capitalize (OS.Path.file fname) ^ "/", to = "",
+                                    hyphenate = false}],
                        filterUrl = [],
                        filterMime = [],
                        filterRequest = [],
@@ -518,6 +536,7 @@ fun parseUrp' accLibs fname =
                     val timeout = ref NONE
                     val ffi = ref []
                     val link = ref []
+                    val linker = ref NONE
                     val headers = ref []
                     val scripts = ref []
                     val clientToServer = ref []
@@ -552,6 +571,7 @@ fun parseUrp' accLibs fname =
                                 timeout = Option.getOpt (!timeout, 60),
                                 ffi = rev (!ffi),
                                 link = rev (!link),
+                                linker = !linker,
                                 headers = rev (!headers),
                                 scripts = rev (!scripts),
                                 clientToServer = rev (!clientToServer),
@@ -607,6 +627,7 @@ fun parseUrp' accLibs fname =
                                 timeout = #timeout old,
                                 ffi = #ffi old @ #ffi new,
                                 link = #link old @ #link new,
+                                linker = mergeO (fn (_, new) => new) (#linker old, #linker new),
                                 headers = #headers old @ #headers new,
                                 scripts = #scripts old @ #scripts new,
                                 clientToServer = #clientToServer old @ #clientToServer new,
@@ -742,6 +763,7 @@ fun parseUrp' accLibs fname =
                                     in
                                         link := arg :: !link
                                     end
+                                  | "linker" => linker := SOME arg
                                   | "include" => headers := relifyA arg :: !headers
                                   | "script" => scripts := arg :: !scripts
                                   | "clientToServer" => clientToServer := ffiS () :: !clientToServer
@@ -753,17 +775,19 @@ fun parseUrp' accLibs fname =
                                   | "jsFunc" => jsFuncs := ffiM () :: !jsFuncs
                                   | "rewrite" =>
                                     let
-                                        fun doit (pkind, from, to) =
+                                        fun doit (pkind, from, to, hyph) =
                                             let
                                                 val pkind = parsePkind pkind
                                                 val (kind, from) = parseFrom from
                                             in
-                                                rewrites := {pkind = pkind, kind = kind, from = from, to = to} :: !rewrites
+                                                rewrites := {pkind = pkind, kind = kind, from = from, to = to, hyphenate = hyph} :: !rewrites
                                             end
                                     in
                                         case String.tokens Char.isSpace arg of
-                                            [pkind, from, to] => doit (pkind, from, to)
-                                          | [pkind, from] => doit (pkind, from, "")
+                                            [pkind, from, to, "[-]"] => doit (pkind, from, to, true)
+                                          | [pkind, from, "[-]"] => doit (pkind, from, "", true)
+                                          | [pkind, from, to] => doit (pkind, from, to, false)
+                                          | [pkind, from] => doit (pkind, from, "", false)
                                           | _ => ErrorMsg.error "Bad 'rewrite' syntax"
                                     end
                                   | "allow" =>
@@ -873,10 +897,13 @@ structure SM = BinaryMapFn(struct
 val moduleRoots = ref ([] : (string * string) list)
 fun addModuleRoot (k, v) = moduleRoots := (k, v) :: !moduleRoots
 
-structure SS = BinarySetFn(struct
-                           type ord_key = string
-                           val compare = String.compare
-                           end)
+structure SK = struct
+type ord_key = string
+val compare = String.compare
+end
+
+structure SS = BinarySetFn(SK)
+structure SM = BinaryMapFn(SK)
 
 val parse = {
     func = fn {database, sources = fnames, ffi, onError, ...} : job =>
@@ -911,7 +938,7 @@ val parse = {
                           val sgn = (Source.SgnConst (#func parseUrs urs), loc)
                       in
                           checkErrors ();
-                          (Source.DFfiStr (mname, sgn), loc)
+                          (Source.DFfiStr (mname, sgn, if !Elaborate.incremental then SOME (OS.FileSys.modTime urs) else NONE), loc)
                       end
 
                   val defed = ref SS.empty
@@ -937,8 +964,12 @@ val parse = {
                                      first = ErrorMsg.dummyPos,
                                      last = ErrorMsg.dummyPos}
 
+                          val urt = OS.FileSys.modTime ur
+                          val urst = (OS.FileSys.modTime urs) handle _ => urt
+
                           val ds = #func parseUr ur
-                          val d = (Source.DStr (mname, sgnO, (Source.StrConst ds, loc)), loc)
+                          val d = (Source.DStr (mname, sgnO, if !Elaborate.incremental then SOME (if Time.> (urt, urst) then urt else urst) else NONE,
+                                                (Source.StrConst ds, loc)), loc)
 
                           val fname = OS.Path.mkCanonical fname
                           val d = case List.find (fn (root, name) =>
@@ -996,14 +1027,14 @@ val parse = {
                                                                                          else
                                                                                              (Source.StrVar part, loc)
                                                                            in
-                                                                               (Source.DStr (part, NONE, imp),
+                                                                               (Source.DStr (part, NONE, NONE, imp),
                                                                                 loc) :: ds
                                                                            end
                                                                        else
                                                                            ds) [] (!fulls)
                                                   in
                                                       defed := SS.add (!defed, this);
-                                                      (Source.DStr (piece, NONE,
+                                                      (Source.DStr (piece, NONE, NONE,
                                                                     (Source.StrConst (if old then
                                                                                           simOpen ()
                                                                                           @ [makeD this pieces]
@@ -1071,6 +1102,18 @@ val parse = {
                                    NONE => ds
                                  | SOME v => ds @ [(Source.DOnError v, loc)]
                   in
+                      ignore (List.foldl (fn (d, used) =>
+                                             case #1 d of
+                                                 Source.DStr (x, _, _, _) =>
+                                                 (case SM.find (used, x) of
+                                                      SOME loc =>
+                                                      (ErrorMsg.error ("Duplicate top-level module name " ^ x);
+                                                       Print.prefaces "Files" [("Previous", Print.PD.string (ErrorMsg.spanToString loc)),
+                                                                               ("Current", Print.PD.string (ErrorMsg.spanToString (#2 d)))];
+                                                       used)
+                                                    | NONE =>
+                                                      SM.insert (used, x, #2 d))
+                                               | _ => used) SM.empty ds);
                       ds
                   end handle Empty => ds
               end,
@@ -1079,18 +1122,22 @@ val parse = {
 
 val toParse = transform parse "parse" o toParseJob
 
-fun libFile s = OS.Path.joinDirFile {dir = Config.libUr,
-                                     file = s}
-fun clibFile s = OS.Path.joinDirFile {dir = Config.libC,
-                                      file = s}
-
 val elaborate = {
     func = fn file => let
-                  val basis = #func parseUrs (libFile "basis.urs")
-                  val topSgn = #func parseUrs (libFile "top.urs")
-                  val topStr = #func parseUr (libFile "top.ur")
+                  val basisF = Settings.libFile "basis.urs"
+                  val topF = Settings.libFile "top.urs"
+                  val topF' = Settings.libFile "top.ur"
+
+                  val basis = #func parseUrs basisF
+                  val topSgn = #func parseUrs topF
+                  val topStr = #func parseUr topF'
+
+                  val tm1 = OS.FileSys.modTime topF
+                  val tm2 = OS.FileSys.modTime topF'
               in
-                  Elaborate.elabFile basis topStr topSgn ElabEnv.empty file
+                  Elaborate.elabFile basis (OS.FileSys.modTime basisF)
+                                     topStr topSgn (if Time.< (tm1, tm2) then tm2 else tm1)
+                                     ElabEnv.empty file
               end,
     print = ElabPrint.p_file ElabEnv.empty
 }
@@ -1356,14 +1403,14 @@ val escapeFilename = String.translate (fn #" " => "\\ " | #"\"" => "\\\"" | #"'"
 
 val beforeC = ref (fn () => ())
 
-fun compileC {cname, oname, ename, libs, profile, debug, link = link'} =
+fun compileC {cname, oname, ename, libs, profile, debug, linker, link = link'} =
     let
         val proto = Settings.currentProtocol ()
 
         val lib = if Settings.getStaticLinking () then
-                      #linkStatic proto ^ " " ^ Config.lib ^ "/../liburweb.a"
+                      " " ^ !Settings.configLib ^ "/" ^ #linkStatic proto ^ " " ^ !Settings.configLib ^ "/liburweb.a"
                   else
-                      "-L" ^ Config.lib ^ "/.. " ^ #linkDynamic proto ^ " -lurweb"
+                      "-L" ^ !Settings.configLib ^ " " ^ #linkDynamic proto ^ " -lurweb"
 
         val opt = if debug then
                       ""
@@ -1371,11 +1418,13 @@ fun compileC {cname, oname, ename, libs, profile, debug, link = link'} =
                       " -O3"
 
         val compile = Config.ccompiler ^ " " ^ Config.ccArgs ^ " " ^ Config.pthreadCflags ^ " -Wimplicit -Werror -Wno-unused-value"
-                      ^ opt ^ " -I " ^ Config.includ
+                      ^ opt ^ " -I " ^ !Settings.configInclude
                       ^ " " ^ #compile proto
                       ^ " -c " ^ escapeFilename cname ^ " -o " ^ escapeFilename oname
 
-        val link = Config.ccompiler ^ " -Werror" ^ opt ^ " " ^ Config.ccArgs ^ " " ^ Config.pthreadCflags ^ " " ^ Config.pthreadLibs
+        val linker = Option.getOpt (linker, Config.ccompiler ^ " -Werror" ^ opt ^ " " ^ Config.ccArgs ^ " " ^ Config.pthreadCflags ^ " " ^ Config.pthreadLibs)
+
+        val link = linker
                    ^ " " ^ lib ^ " " ^ escapeFilename oname ^ " " ^ libs ^ " -lm " ^ Config.openssl ^ " -o " ^ escapeFilename ename
 
         val (compile, link) =
@@ -1425,10 +1474,10 @@ fun compile job =
                     in
                         OS.FileSys.mkDir dir;
                         (cname, oname,
-                      fn () => (OS.FileSys.remove cname;
-                                OS.FileSys.remove oname;
-                                OS.FileSys.rmDir dir)
-                         handle OS.SysErr _ => OS.FileSys.rmDir dir)
+                      fn () => (if OS.Process.isSuccess (OS.Process.system ("rm -rf " ^ dir)) then
+                                    ()
+                                else
+                                    raise Fail ("Unable to delete temporary directory " ^ dir)))
                     end
             val ename = #exe job
         in
@@ -1462,7 +1511,7 @@ fun compile job =
                          end;
 
                      compileC {cname = cname, oname = oname, ename = ename, libs = libs,
-                               profile = #profile job, debug = #debug job, link = #link job}
+                               profile = #profile job, debug = #debug job, linker = #linker job, link = #link job}
                      
                      before cleanup ())
             end

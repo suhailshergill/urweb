@@ -76,7 +76,6 @@ uw_unit uw_Basis_set_client_source(uw_context, uw_Basis_source, uw_Basis_string)
 
 void uw_set_script_header(uw_context, const char*);
 char *uw_Basis_get_settings(uw_context, uw_unit);
-char *uw_Basis_get_script(uw_context, uw_unit);
 char *uw_get_real_script(uw_context);
 
 uw_Basis_string uw_Basis_maybe_onload(uw_context, uw_Basis_string);
@@ -256,6 +255,8 @@ uw_Basis_time uw_Basis_now(uw_context);
 uw_Basis_time uw_Basis_addSeconds(uw_context, uw_Basis_time, uw_Basis_int);
 uw_Basis_int uw_Basis_diffInSeconds(uw_context, uw_Basis_time, uw_Basis_time);
 uw_Basis_int uw_Basis_toSeconds(uw_context, uw_Basis_time);
+uw_Basis_int uw_Basis_diffInMilliseconds(uw_context, uw_Basis_time, uw_Basis_time);
+uw_Basis_int uw_Basis_toMilliseconds(uw_context, uw_Basis_time);
 extern const uw_Basis_time uw_Basis_minTime;
 
 void uw_register_transactional(uw_context, void *data, uw_callback commit, uw_callback rollback, uw_callback_with_retry free);
@@ -354,5 +355,9 @@ uw_Basis_float uw_Basis_floatFromInt(uw_context, uw_Basis_int);
 uw_Basis_int uw_Basis_ceil(uw_context, uw_Basis_float);
 uw_Basis_int uw_Basis_trunc(uw_context, uw_Basis_float);
 uw_Basis_int uw_Basis_round(uw_context, uw_Basis_float);
+
+uw_Basis_string uw_Basis_atom(uw_context, uw_Basis_string);
+uw_Basis_string uw_Basis_css_url(uw_context, uw_Basis_string);
+uw_Basis_string uw_Basis_property(uw_context, uw_Basis_string);
 
 #endif

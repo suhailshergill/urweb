@@ -1,4 +1,4 @@
-(* Copyright (c) 2008-2010, Adam Chlipala
+(* Copyright (c) 2008-2010, 2012, Adam Chlipala
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -36,20 +36,6 @@ structure U = ElabUtil
 open Print
 structure P = ElabPrint
 
-val simplCon = U.Con.mapB {kind = fn _ => fn k => k,
-                           con = fn env => fn c =>
-                                              let
-                                                  val c = (c, ErrorMsg.dummySpan)
-                                                  val c' = ElabOps.hnormCon env c
-                                              in
-                                                  (*prefaces "simpl" [("c", P.p_con env c),
-                                                                    ("c'", P.p_con env c')];*)
-                                                  #1 c'
-                                              end,
-                           bind = fn (env, U.Con.RelC (x, k)) => E.pushCRel env x k
-                                   | (env, U.Con.NamedC (x, n, k, co)) => E.pushCNamedAs env x n k co
-                                   | (env, _) => env}
-
 val p_kind = P.p_kind
              
 datatype kind_error =
@@ -80,13 +66,13 @@ fun kunifyError env err =
         [("Kind 1", p_kind env k1),
          ("Kind 2", p_kind env k2)]
 
-fun p_con env c = P.p_con env (simplCon env c)
+fun p_con env c = P.p_con env (ElabOps.reduceCon env c)
 
 datatype con_error =
          UnboundCon of ErrorMsg.span * string
        | UnboundDatatype of ErrorMsg.span * string
        | UnboundStrInCon of ErrorMsg.span * string
-       | WrongKind of con * kind * kind * kunify_error
+       | WrongKind of con * kind * kind * E.env * kunify_error
        | DuplicateField of ErrorMsg.span * string
        | ProjBounds of con * int
        | ProjMismatch of con * kind
@@ -99,12 +85,12 @@ fun conError env err =
         ErrorMsg.errorAt loc ("Unbound datatype " ^ s)
       | UnboundStrInCon (loc, s) =>
         ErrorMsg.errorAt loc ("Unbound structure " ^ s)
-      | WrongKind (c, k1, k2, kerr) =>
+      | WrongKind (c, k1, k2, env', kerr) =>
         (ErrorMsg.errorAt (#2 c) "Wrong kind";
          eprefaces' [("Constructor", p_con env c),
                      ("Have kind", p_kind env k1),
                      ("Need kind", p_kind env k2)];
-         kunifyError env kerr)
+         kunifyError env' kerr)
       | DuplicateField (loc, s) =>
         ErrorMsg.errorAt loc ("Duplicate record field " ^ s)
       | ProjBounds (c, n) =>
@@ -117,24 +103,24 @@ fun conError env err =
                      ("Kind", p_kind env k)])
 
 datatype cunify_error =
-         CKind of kind * kind * kunify_error
+         CKind of kind * kind * E.env * kunify_error
        | COccursCheckFailed of con * con
        | CIncompatible of con * con
        | CExplicitness of con * con
        | CKindof of kind * con * string
-       | CRecordFailure of con * con * (con * con * con * cunify_error option) option
+       | CRecordFailure of con * con * (con * con * con * (E.env * cunify_error) option) option
        | TooLifty of ErrorMsg.span * ErrorMsg.span
        | TooUnify of con * con
        | TooDeep
        | CScope of con * con
 
-fun cunifyError env err =
+fun cunifyError env err : unit =
     case err of
-        CKind (k1, k2, kerr) =>
+        CKind (k1, k2, env', kerr) =>
         (eprefaces "Kind unification failure"
                    [("Have", p_kind env k1),
                     ("Need", p_kind env k2)];
-         kunifyError env kerr)
+         kunifyError env' kerr)
       | COccursCheckFailed (c1, c2) =>
         eprefaces "Constructor occurs check failed"
                   [("Have", p_con env c1),
@@ -162,7 +148,7 @@ fun cunifyError env err =
                              ("Value 1", p_con env t1),
                              ("Value 2", p_con env t2)]));
          case fo of
-             SOME (_, _, _, SOME err') => cunifyError env err'
+             SOME (_, _, _, SOME (env', err')) => cunifyError env' err'
            | _ => ())
       | TooLifty (loc1, loc2) =>
         (ErrorMsg.errorAt loc1 "Can't unify two unification variables that both have suspended liftings";
@@ -180,12 +166,12 @@ fun cunifyError env err =
 datatype exp_error =
        UnboundExp of ErrorMsg.span * string
      | UnboundStrInExp of ErrorMsg.span * string
-     | Unify of exp * con * con * cunify_error
+     | Unify of exp * con * con * E.env * cunify_error
      | Unif of string * ErrorMsg.span * con
      | WrongForm of string * exp * con
      | IncompatibleCons of con * con
      | DuplicatePatternVariable of ErrorMsg.span * string
-     | PatUnify of pat * con * con * cunify_error
+     | PatUnify of pat * con * con * E.env * cunify_error
      | UnboundConstructor of ErrorMsg.span * string list * string
      | PatHasArg of ErrorMsg.span
      | PatHasNoArg of ErrorMsg.span
@@ -195,7 +181,14 @@ datatype exp_error =
      | OutOfContext of ErrorMsg.span * (exp * con) option
      | IllegalRec of string * exp
 
-val p_exp = P.p_exp
+val simplExp = U.Exp.mapB {kind = fn _ => fn k => k,
+                           con = fn env => fn c => #1 (ElabOps.reduceCon env (c, ErrorMsg.dummySpan)),
+                           exp = fn _ => fn e => e,
+                           bind = fn (env, U.Exp.RelC (x, k)) => E.pushCRel env x k
+                                   | (env, U.Exp.NamedC (x, n, k, co)) => E.pushCNamedAs env x n k co
+                                   | (env, _) => env}
+
+fun p_exp env e = P.p_exp env (simplExp env e)
 val p_pat = P.p_pat
 
 fun expError env err =
@@ -204,12 +197,12 @@ fun expError env err =
         ErrorMsg.errorAt loc ("Unbound expression variable " ^ s)
       | UnboundStrInExp (loc, s) =>
         ErrorMsg.errorAt loc ("Unbound structure " ^ s)
-      | Unify (e, c1, c2, uerr) =>
+      | Unify (e, c1, c2, env', uerr) =>
         (ErrorMsg.errorAt (#2 e) "Unification failure";
          eprefaces' [("Expression", p_exp env e),
                      ("Have con", p_con env c1),
                      ("Need con", p_con env c2)];
-         cunifyError env uerr)
+         cunifyError env' uerr)
       | Unif (action, loc, c) =>
         (ErrorMsg.errorAt loc ("Unification variable blocks " ^ action);
          eprefaces' [("Con", p_con env c)])
@@ -223,12 +216,12 @@ fun expError env err =
                      ("Need", p_con env c2)])
       | DuplicatePatternVariable (loc, s) =>
         ErrorMsg.errorAt loc ("Duplicate pattern variable " ^ s)
-      | PatUnify (p, c1, c2, uerr) =>
+      | PatUnify (p, c1, c2, env', uerr) =>
         (ErrorMsg.errorAt (#2 p) "Unification failure for pattern";
          eprefaces' [("Pattern", p_pat env p),
                      ("Have con", p_con env c1),
                      ("Need con", p_con env c2)];
-         cunifyError env uerr)
+         cunifyError env' uerr)
       | UnboundConstructor (loc, ms, s) =>
         ErrorMsg.errorAt loc ("Unbound constructor " ^ String.concatWith "." (ms @ [s]) ^ " in pattern")
       | PatHasArg loc =>
@@ -246,17 +239,10 @@ fun expError env err =
                                               ("Type", p_con env c)]) co)
       | Unresolvable (loc, c) =>
         (ErrorMsg.errorAt loc "Can't resolve type class instance";
-         eprefaces' [("Class constraint", p_con env c)(*,
-                     ("Class database", p_list (fn (c, rules) =>
-                                                   box [P.p_con env c,
-                                                        PD.string ":",
-                                                        space,
-                                                        p_list (fn (c, e) =>
-                                                                   box [p_exp env e,
-                                                                        PD.string ":",
-                                                                        space,
-                                                                        P.p_con env c]) rules])
-                                        (E.listClasses env))*)])
+         eprefaces' ([("Class constraint", p_con env c)]
+                     @ (case E.resolveFailureCause () of
+                            NONE => []
+                          | SOME c' => [("Reduced to unresolvable", p_con env c')])))
       | IllegalRec (x, e) =>
         (ErrorMsg.errorAt (#2 e) "Illegal 'val rec' righthand side (must be a function abstraction)";
          eprefaces' [("Variable", PD.string x),
@@ -336,13 +322,13 @@ fun declError env err =
 datatype sgn_error =
          UnboundSgn of ErrorMsg.span * string
        | UnmatchedSgi of ErrorMsg.span * sgn_item
-       | SgiWrongKind of ErrorMsg.span * sgn_item * kind * sgn_item * kind * kunify_error
-       | SgiWrongCon of ErrorMsg.span * sgn_item * con * sgn_item * con * cunify_error
+       | SgiWrongKind of ErrorMsg.span * sgn_item * kind * sgn_item * kind * E.env * kunify_error
+       | SgiWrongCon of ErrorMsg.span * sgn_item * con * sgn_item * con * E.env * cunify_error
        | SgiMismatchedDatatypes of ErrorMsg.span * sgn_item * sgn_item
-                                   * (con * con * cunify_error) option
+                                   * (con * con * E.env * cunify_error) option
        | SgnWrongForm of ErrorMsg.span * sgn * sgn
        | UnWhereable of sgn * string
-       | WhereWrongKind of kind * kind * kunify_error
+       | WhereWrongKind of kind * kind * E.env * kunify_error
        | NotIncludable of sgn
        | DuplicateCon of ErrorMsg.span * string
        | DuplicateVal of ErrorMsg.span * string
@@ -360,29 +346,29 @@ fun sgnError env err =
       | UnmatchedSgi (loc, sgi) =>
         (ErrorMsg.errorAt loc "Unmatched signature item";
          eprefaces' [("Item", p_sgn_item env sgi)])
-      | SgiWrongKind (loc, sgi1, k1, sgi2, k2, kerr) =>
+      | SgiWrongKind (loc, sgi1, k1, sgi2, k2, env', kerr) =>
         (ErrorMsg.errorAt loc "Kind unification failure in signature matching:";
          eprefaces' [("Have", p_sgn_item env sgi1),
                      ("Need", p_sgn_item env sgi2),
                      ("Kind 1", p_kind env k1),
                      ("Kind 2", p_kind env k2)];
-         kunifyError env kerr)
-      | SgiWrongCon (loc, sgi1, c1, sgi2, c2, cerr) =>
+         kunifyError env' kerr)
+      | SgiWrongCon (loc, sgi1, c1, sgi2, c2, env', cerr) =>
         (ErrorMsg.errorAt loc "Constructor unification failure in signature matching:";
          eprefaces' [("Have", p_sgn_item env sgi1),
                      ("Need", p_sgn_item env sgi2),
                      ("Con 1", p_con env c1),
                      ("Con 2", p_con env c2)];
-         cunifyError env cerr)
+         cunifyError env' cerr)
       | SgiMismatchedDatatypes (loc, sgi1, sgi2, cerro) =>
         (ErrorMsg.errorAt loc "Mismatched 'datatype' specifications:";
          eprefaces' [("Have", p_sgn_item env sgi1),
                      ("Need", p_sgn_item env sgi2)];
-         Option.app (fn (c1, c2, ue) =>
+         Option.app (fn (c1, c2, env', ue) =>
                         (eprefaces "Unification error"
-                                   [("Con 1", p_con env c1),
-                                    ("Con 2", p_con env c2)];
-                         cunifyError env ue)) cerro)
+                                   [("Con 1", p_con env' c1),
+                                    ("Con 2", p_con env' c2)];
+                         cunifyError env' ue)) cerro)
       | SgnWrongForm (loc, sgn1, sgn2) =>
         (ErrorMsg.errorAt loc "Incompatible signatures:";
          eprefaces' [("Sig 1", p_sgn env sgn1),
@@ -391,11 +377,11 @@ fun sgnError env err =
         (ErrorMsg.errorAt (#2 sgn) "Unavailable field for 'where'";
          eprefaces' [("Signature", p_sgn env sgn),
                      ("Field", PD.string x)])
-      | WhereWrongKind (k1, k2, kerr) =>
+      | WhereWrongKind (k1, k2, env', kerr) =>
         (ErrorMsg.errorAt (#2 k1) "Wrong kind for 'where'";
          eprefaces' [("Have", p_kind env k1),
                      ("Need", p_kind env k2)];
-         kunifyError env kerr)
+         kunifyError env' kerr)
       | NotIncludable sgn =>
         (ErrorMsg.errorAt (#2 sgn) "Invalid signature to 'include'";
          eprefaces' [("Signature", p_sgn env sgn)])
@@ -416,7 +402,7 @@ datatype str_error =
        | NotFunctor of sgn
        | FunctorRebind of ErrorMsg.span
        | UnOpenable of sgn
-       | NotType of ErrorMsg.span * kind * (kind * kind * kunify_error)
+       | NotType of ErrorMsg.span * kind * (kind * kind * E.env * kunify_error)
        | DuplicateConstructor of string * ErrorMsg.span
        | NotDatatype of ErrorMsg.span
 
@@ -432,12 +418,12 @@ fun strError env err =
       | UnOpenable sgn =>
         (ErrorMsg.errorAt (#2 sgn) "Un-openable structure";
          eprefaces' [("Signature", p_sgn env sgn)])
-      | NotType (loc, k, (k1, k2, ue)) =>
+      | NotType (loc, k, (k1, k2, env', ue)) =>
         (ErrorMsg.errorAt loc "'val' type kind is not 'Type'";
          eprefaces' [("Kind", p_kind env k),
                      ("Subkind 1", p_kind env k1),
                      ("Subkind 2", p_kind env k2)];
-         kunifyError env ue)
+         kunifyError env' ue)
       | DuplicateConstructor (x, loc) =>
         ErrorMsg.errorAt loc ("Duplicate datatype constructor " ^ x)
       | NotDatatype loc =>

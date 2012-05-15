@@ -1,4 +1,4 @@
-(* Copyright (c) 2008-2011, Adam Chlipala
+(* Copyright (c) 2008-2012, Adam Chlipala
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -219,7 +219,7 @@ fun tagIn bt =
 
 datatype prop_kind = Delete | Update
 
-datatype attr = Class of exp | DynClass of exp | Normal of con * exp
+datatype attr = Class of exp | DynClass of exp | Style of exp | DynStyle of exp | Normal of con * exp
 
 fun patType loc (p : pat) =
     case #1 p of
@@ -246,6 +246,63 @@ fun tnamesOf (e, _) =
       | EDisjointApp e => tnamesOf e
       | _ => []
 
+fun classOut (s, pos) =
+    let
+        val s = case s of
+                    "table" => "tabl"
+                  | _ => s
+    in
+        (EVar ([], String.translate (fn #"-" => "_" | ch => str ch) s, Infer), pos)
+    end
+
+fun parseClass s pos =
+    case String.tokens Char.isSpace s of
+        [] => (EVar (["Basis"], "null", Infer), pos)
+      | class :: classes =>
+        foldl (fn (s, e) => (EApp ((EApp ((EVar (["Basis"], "classes", Infer), pos), e), pos), classOut (s, pos)), pos))
+                (classOut (class, pos)) classes
+
+fun parseValue s pos =
+    if String.isPrefix "url(" s andalso String.isSuffix ")" s then
+        let
+            val s = String.substring (s, 4, size s - 5)
+
+            val s = if size s >= 2
+                       andalso ((String.isPrefix "\"" s andalso String.isSuffix "\"" s)
+                                orelse (String.isPrefix "'" s andalso String.isSuffix "'" s)) then
+                        String.substring (s, 1, size s - 2)
+                    else
+                        s
+        in
+            (EApp ((EVar (["Basis"], "css_url", Infer), pos),
+                   (EApp ((EVar (["Basis"], "bless", Infer), pos),
+                          (EPrim (Prim.String s), pos)), pos)), pos)
+        end
+    else
+        (EApp ((EVar (["Basis"], "atom", Infer), pos),
+               (EPrim (Prim.String s), pos)), pos)
+
+fun parseProperty s pos =
+    let
+        val (befor, after) = Substring.splitl (fn ch => ch <> #":") (Substring.full s)
+    in
+        if Substring.isEmpty after then
+            (ErrorMsg.errorAt pos ("Invalid CSS property syntax: " ^ s);
+             (EPrim (Prim.String ""), pos))
+        else
+            foldl (fn (value, e) => (EApp ((EApp ((EVar (["Basis"], "value", Infer), pos), e), pos), parseValue value pos), pos))
+                (EApp ((EVar (["Basis"], "property", Infer), pos),
+                       (EPrim (Prim.String (Substring.string (#2 (Substring.splitl Char.isSpace befor)))), pos)), pos)
+                (String.tokens Char.isSpace (Substring.string (Substring.slice (after, 1, NONE))))
+    end
+
+fun parseStyle s pos =
+    case String.tokens (fn ch => ch = #";") s of
+        [] => (EVar (["Basis"], "noStyle", Infer), pos)
+      | props =>
+        foldl (fn (s, e) => (EApp ((EApp ((EVar (["Basis"], "oneProperty", Infer), pos), e), pos), parseProperty s pos), pos))
+                (EVar (["Basis"], "noStyle", Infer), pos) props
+
 %%
 %header (functor UrwebLrValsFn(structure Token : TOKEN))
 
@@ -262,7 +319,7 @@ fun tnamesOf (e, _) =
  | ARROW | LARROW | DARROW | STAR | SEMI | KARROW | DKARROW | BANG
  | FN | PLUSPLUS | MINUSMINUS | MINUSMINUSMINUS | DOLLAR | TWIDDLE | CARET
  | LET | IN
- | STRUCTURE | SIGNATURE | STRUCT | SIG | END | FUNCTOR | WHERE | EXTERN | SQL | SELECT1
+ | STRUCTURE | SIGNATURE | STRUCT | SIG | END | FUNCTOR | WHERE | SQL | SELECT1
  | INCLUDE | OPEN | CONSTRAINT | CONSTRAINTS | EXPORT | TABLE | SEQUENCE | VIEW
  | COOKIE | STYLE | TASK | POLICY
  | CASE | IF | THEN | ELSE | ANDALSO | ORELSE
@@ -276,7 +333,7 @@ fun tnamesOf (e, _) =
  | LIMIT | OFFSET | ALL
  | TRUE | FALSE | CAND | OR | NOT
  | COUNT | AVG | SUM | MIN | MAX
- | ASC | DESC
+ | ASC | DESC | RANDOM
  | INSERT | INTO | VALUES | UPDATE | SET | DELETE | NULL | IS | COALESCE | LIKE
  | CURRENT_TIMESTAMP
  | NE | LT | LE | GT | GE
@@ -300,6 +357,7 @@ fun tnamesOf (e, _) =
  | dcon of string * con option
 
  | pkopt of exp
+ | pk of exp
  | commaOpt of unit
 
  | cst of exp
@@ -376,7 +434,7 @@ fun tnamesOf (e, _) =
  | rpat of (string * pat) list * bool
  | ptuple of pat list
 
- | attrs of exp option * exp option * (con * exp) list
+ | attrs of exp option * exp option * exp option * exp option * (con * exp) list
  | attr of attr
  | attrv of exp
 
@@ -405,6 +463,7 @@ fun tnamesOf (e, _) =
  | obopt of exp
  | obitem of exp * exp
  | obexps of exp
+ | popt of unit
  | diropt of exp
  | lopt of exp
  | ofopt of exp
@@ -491,17 +550,16 @@ decl   : CON SYMBOL cargl2 kopt EQ cexp (let
        | FUN valis                      ([(DValRec valis, s (FUNleft, valisright))])
 
        | SIGNATURE CSYMBOL EQ sgn       ([(DSgn (CSYMBOL, sgn), s (SIGNATUREleft, sgnright))])
-       | STRUCTURE CSYMBOL EQ str       ([(DStr (CSYMBOL, NONE, str), s (STRUCTUREleft, strright))])
-       | STRUCTURE CSYMBOL COLON sgn EQ str ([(DStr (CSYMBOL, SOME sgn, str), s (STRUCTUREleft, strright))])
+       | STRUCTURE CSYMBOL EQ str       ([(DStr (CSYMBOL, NONE, NONE, str), s (STRUCTUREleft, strright))])
+       | STRUCTURE CSYMBOL COLON sgn EQ str ([(DStr (CSYMBOL, SOME sgn, NONE, str), s (STRUCTUREleft, strright))])
        | FUNCTOR CSYMBOL LPAREN CSYMBOL COLON sgn RPAREN EQ str
-                                        ([(DStr (CSYMBOL1, NONE,
+                                        ([(DStr (CSYMBOL1, NONE, NONE,
                                                  (StrFun (CSYMBOL2, sgn1, NONE, str), s (FUNCTORleft, strright))),
                                            s (FUNCTORleft, strright))])
        | FUNCTOR CSYMBOL LPAREN CSYMBOL COLON sgn RPAREN COLON sgn EQ str
-                                        ([(DStr (CSYMBOL1, NONE,
+                                        ([(DStr (CSYMBOL1, NONE, NONE,
                                                  (StrFun (CSYMBOL2, sgn1, SOME sgn2, str), s (FUNCTORleft, strright))),
                                            s (FUNCTORleft, strright))])
-       | EXTERN STRUCTURE CSYMBOL COLON sgn ([(DFfiStr (CSYMBOL, sgn), s (EXTERNleft, sgnright))])
        | OPEN mpath                     (case mpath of
                                              [] => raise Fail "Impossible mpath parse [1]"
                                            | m :: ms => [(DOpen (m, ms), s (OPENleft, mpathright))])
@@ -514,7 +572,7 @@ decl   : CON SYMBOL cargl2 kopt EQ cexp (let
                                                          foldl (fn (m, str) => (StrProj (str, m), loc))
                                                          (StrVar m, loc) ms
                                          in
-                                             [(DStr ("anon", NONE, (StrApp (m, str), loc)), loc),
+                                             [(DStr ("anon", NONE, NONE, (StrApp (m, str), loc)), loc),
                                               (DOpen ("anon", []), loc)]
                                          end)
        | OPEN CONSTRAINTS mpath         (case mpath of
@@ -706,9 +764,9 @@ pmodes :                                ([])
 commaOpt:                               ()
         | COMMA                         ()
 
-pkopt  :                                (EVar (["Basis"], "no_primary_key", Infer), dummy)
-       | PRIMARY KEY tnames             (let
-                                             val loc = s (PRIMARYleft, tnamesright)
+pk     : LBRACE LBRACE eexp RBRACE RBRACE (eexp)
+       | tnames                         (let
+                                             val loc = s (tnamesleft, tnamesright)
 
                                              val e = (EVar (["Basis"], "primary_key", TypesOnly), loc)
                                              val e = (ECApp (e, #1 (#1 tnames)), loc)
@@ -723,6 +781,9 @@ pkopt  :                                (EVar (["Basis"], "no_primary_key", Infe
                                          in
                                              (EApp (e, witness), loc)
                                          end)
+
+pkopt  :                                (EVar (["Basis"], "no_primary_key", Infer), dummy)
+       | PRIMARY KEY pk                 (pk)
 
 valis  : vali                           ([vali])
        | vali AND valis                 (vali :: valis)
@@ -1051,7 +1112,10 @@ eapps  : eterm                          (eterm)
        | eapps LBRACK cexp RBRACK       (ECApp (eapps, cexp), s (eappsleft, RBRACKright))
        | eapps BANG                     (EDisjointApp eapps, s (eappsleft, BANGright))
 
-eexp   : eapps                          (eapps)
+eexp   : eapps                          (case #1 eapps of
+                                             EApp ((EVar ([], "CLASS", _), _), (EPrim (Prim.String s), loc)) => parseClass s loc
+                                           | EApp ((EVar ([], "STYLE", _), _), (EPrim (Prim.String s), loc)) => parseStyle s loc
+                                           | _ => eapps)
        | FN eargs DARROW eexp           (let
                                              val loc = s (FNleft, eexpright)
                                          in
@@ -1517,16 +1581,26 @@ tag    : tagHead attrs                  (let
 
                                              val e = (EVar (["Basis"], "tag", Infer), pos)
                                              val eo = case #1 attrs of
-                                                          NONE => (EVar (["Basis"], "None", Infer), pos)
-                                                        | SOME e => (EApp ((EVar (["Basis"], "Some", Infer), pos),
-                                                                           e), pos)
+                                                          NONE => (EVar (["Basis"], "null", Infer), pos)
+                                                        | SOME (EPrim (Prim.String s), pos) => parseClass s pos
+                                                        | SOME e => e
                                              val e = (EApp (e, eo), pos)
                                              val eo = case #2 attrs of
                                                           NONE => (EVar (["Basis"], "None", Infer), pos)
                                                         | SOME e => (EApp ((EVar (["Basis"], "Some", Infer), pos),
                                                                            e), pos)
                                              val e = (EApp (e, eo), pos)
-                                             val e = (EApp (e, (ERecord (#3 attrs), pos)), pos)
+                                             val eo = case #3 attrs of
+                                                          NONE => (EVar (["Basis"], "noStyle", Infer), pos)
+                                                        | SOME (EPrim (Prim.String s), pos) => parseStyle s pos
+                                                        | SOME e => e
+                                             val e = (EApp (e, eo), pos)
+                                             val eo = case #4 attrs of
+                                                          NONE => (EVar (["Basis"], "None", Infer), pos)
+                                                        | SOME e => (EApp ((EVar (["Basis"], "Some", Infer), pos),
+                                                                           e), pos)
+                                             val e = (EApp (e, eo), pos)
+                                             val e = (EApp (e, (ERecord (#5 attrs), pos)), pos)
                                              val e = (EApp (e, (EApp (#2 tagHead,
                                                                       (ERecord [], pos)), pos)), pos)
                                          in
@@ -1542,7 +1616,7 @@ tagHead: BEGIN_TAG                      (let
                                          end)
        | tagHead LBRACE cexp RBRACE     (#1 tagHead, (ECApp (#2 tagHead, cexp), s (tagHeadleft, RBRACEright)))
                                           
-attrs  :                                (NONE, NONE, [])
+attrs  :                                (NONE, NONE, NONE, NONE, [])
        | attr attrs                     (let
                                              val loc = s (attrleft, attrsright)
                                          in
@@ -1551,19 +1625,31 @@ attrs  :                                (NONE, NONE, [])
                                                  (case #1 attrs of
                                                       NONE => ()
                                                     | SOME _ => ErrorMsg.errorAt loc "Multiple classes specified for tag";
-                                                  (SOME e, #2 attrs, #3 attrs))
+                                                  (SOME e, #2 attrs, #3 attrs, #4 attrs, #5 attrs))
                                                | DynClass e =>
                                                  (case #2 attrs of
                                                       NONE => ()
                                                     | SOME _ => ErrorMsg.errorAt loc "Multiple dynamic classes specified for tag";
-                                                  (#1 attrs, SOME e, #3 attrs))
+                                                  (#1 attrs, SOME e, #3 attrs, #4 attrs, #5 attrs))
+                                               | Style e =>
+                                                 (case #3 attrs of
+                                                      NONE => ()
+                                                    | SOME _ => ErrorMsg.errorAt loc "Multiple styles specified for tag";
+                                                  (#1 attrs, #2 attrs, SOME e, #4 attrs, #5 attrs))
+                                               | DynStyle e =>
+                                                 (case #4 attrs of
+                                                      NONE => ()
+                                                    | SOME _ => ErrorMsg.errorAt loc "Multiple dynamic classes specified for tag";
+                                                  (#1 attrs, #2 attrs, #3 attrs, SOME e, #5 attrs))
                                                | Normal xe =>
-                                                 (#1 attrs, #2 attrs, xe :: #3 attrs)
+                                                 (#1 attrs, #2 attrs, #3 attrs, #4 attrs, xe :: #5 attrs)
                                          end)
 
 attr   : SYMBOL EQ attrv                (case SYMBOL of
 					     "class" => Class attrv
 					   | "dynClass" => DynClass attrv
+                                           | "style" => Style attrv
+					   | "dynStyle" => DynStyle attrv
 					   | _ =>
                                              let
                                                  val sym =
@@ -2034,6 +2120,11 @@ obexps : obitem                         (let
                                          in
                                              (EApp (e, obexps), loc)
                                          end)
+       | RANDOM popt                    (EVar (["Basis"], "sql_order_by_random", Infer), s (RANDOMleft, poptright))
+
+popt   :                                ()
+       | LPAREN RPAREN                  ()
+       | UNIT                           ()
 
 diropt :                                (EVar (["Basis"], "sql_asc", Infer), dummy)
        | ASC                            (EVar (["Basis"], "sql_asc", Infer), s (ASCleft, ASCright))

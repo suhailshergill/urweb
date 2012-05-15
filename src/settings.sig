@@ -16,7 +16,7 @@
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
  * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR 
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
  * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
  * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
  * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
@@ -26,10 +26,22 @@
  *)
 
 signature SETTINGS = sig
-    
+
+    (* XXX these should be unit -> string too *)
+    val configBin : string ref
+    val configLib : string ref
+    val configSrcLib : string ref
+    val configInclude : string ref
+    val configSitelisp : string ref
+
+    val libUr : unit -> string
+    val libC : unit -> string
+    val libJs : unit -> string
+
     val setDebug : bool -> unit
     val getDebug : unit -> bool
-                           
+
+    val libFile : string -> string
     val clibFile : string -> string
 
     (* How do all application URLs begin? *)
@@ -85,7 +97,7 @@ signature SETTINGS = sig
     type rule = { action : action, kind : pattern_kind, pattern : string }
 
     datatype path_kind = Any | Url | Table | Sequence | View | Relation | Cookie | Style
-    type rewrite = { pkind : path_kind, kind : pattern_kind, from : string, to : string }
+    type rewrite = { pkind : path_kind, kind : pattern_kind, from : string, to : string, hyphenate : bool }
 
     (* Rules for rewriting URLs from canonical forms *)
     val setRewriteRules : rewrite list -> unit
@@ -143,6 +155,8 @@ signature SETTINGS = sig
     type dbms = {
          name : string,
          (* Call it this on the command line *)
+         randomFunction : string,
+         (* DBMS's name for random number-generating function *)
          header : string,
          (* Include this C header file *)
          link : string,

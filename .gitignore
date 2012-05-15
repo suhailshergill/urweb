@@ -1,6 +1,5 @@
 .hg
 .hgignore
-*.patch
 
 *~
 .cm
@@ -35,6 +34,8 @@ demo/demo.*
 demo/more/out/*.html
 demo/more/demo.*
 
+doc/*.html
+
 *.sql
 *mlmon.out
 
@@ -43,22 +44,19 @@ demo/more/demo.*
 *.pdf
 *.ps
 *.toc
-aclocal.m4
 
 .depend
 Makefile.coq
 *.vo
+*.v.d
+*.glob
+
+xml/parse
+xml/entities.sml
 
 ^Makefile$
 ^src/c/Makefile$
-^src/coq/Makefile$
 ^libtool$
-^config.h$
-^stamp-h1$
+^include/urweb/config.h$
+^include/urweb/stamp-h1$
 
-build
-Makefile
-src/c/Makefile
-config.h
-libtool
-stamp-h1

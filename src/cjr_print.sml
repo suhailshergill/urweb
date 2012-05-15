@@ -1,4 +1,4 @@
-(* Copyright (c) 2008-2011, Adam Chlipala
+(* Copyright (c) 2008-2012, Adam Chlipala
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -2868,6 +2868,16 @@ fun p_file env (ds, ps) =
                                   string "}}",
                                   newline]
                          end
+                       | TOption _ =>
+                         box [string "uw_input_",
+                              p_ident x,
+                              space,
+                              string "=",
+                              space,
+                              string "uw_get_input(ctx, ",
+                              string (Int.toString n),
+                              string ");",
+                              newline]
                        | _ =>
                          box [string "request = uw_get_",
                               string f,
@@ -2894,6 +2904,19 @@ fun p_file env (ds, ps) =
         val timestamp = LargeInt.toString (Time.toMilliseconds (Time.now ()))
         val app_js = OS.Path.joinDirFile {dir = Settings.getUrlPrefix (),
                                           file = "app." ^ timestamp ^ ".js"}
+
+        val allScripts =
+            let
+                val scripts =
+                    "<script type=\\\"text/javascript\\\" src=\\\""
+                    ^ app_js
+                    ^ "\\\"></script>\\n"
+            in
+                foldl (fn (x, scripts) =>
+                          scripts
+                          ^ "<script type=\\\"text/javascript\\\" src=\\\"" ^ x ^ "\\\"></script>\\n")
+                      scripts (Settings.getScripts ())
+            end
 
         fun p_page (ek, s, n, ts, ran, side, tellSig) =
             let
@@ -2971,6 +2994,18 @@ fun p_file env (ds, ps) =
                      newline,
                      string "if (*request == '/') ++request;",
                      newline,
+                     case ek of
+                         Rpc _ => box [string "if (uw_hasPostBody(ctx)) {",
+                                       newline,
+                                       box [string "uw_Basis_postBody pb = uw_getPostBody(ctx);",
+                                            newline,
+                                            string "if (pb.data[0])",
+                                            newline,
+                                            box [string "request = uw_Basis_strcat(ctx, request, pb.data);"],
+                                            newline],
+                                       string "}",
+                                       newline]
+                       | _ => box [],
                      if couldWrite ek andalso not (Settings.checkNoXsrfProtection s) then
                          box [string "{",
                               newline,
@@ -3010,18 +3045,7 @@ fun p_file env (ds, ps) =
                                         val scripts =
                                             case side of
                                                 ServerOnly => ""
-                                              | _ =>
-                                                let
-                                                    val scripts =
-                                                        "<script type=\\\"text/javascript\\\" src=\\\""
-                                                        ^ app_js
-                                                        ^ "\\\"></script>\\n"
-                                                in
-                                                    foldl (fn (x, scripts) =>
-                                                              scripts
-                                                              ^ "<script type=\\\"text/javascript\\\" src=\\\"" ^ x ^ "\\\"></script>\\n")
-                                                          scripts (Settings.getScripts ())
-                                                end
+                                              | _ => allScripts
                                     in
                                         string scripts
                                     end,
@@ -3107,6 +3131,7 @@ fun p_file env (ds, ps) =
         val expunge = ref 0
         val initialize = ref 0
         val prepped = ref []
+        val hasJs = ref false
 
         val _ = foldl (fn (d, env) =>
                           ((case #1 d of
@@ -3114,6 +3139,7 @@ fun p_file env (ds, ps) =
                                                                                       dbstring := x;
                                                                                       expunge := y;
                                                                                       initialize := z)
+                              | DJavaScript _ => hasJs := true
                               | DTable (s, xts, _, _) => tables := (s, map (fn (x, t) =>
                                                                                (x, sql_type_in env t)) xts) :: !tables
                               | DView (s, xts, _) => views := (s, map (fn (x, t) =>
@@ -3212,7 +3238,7 @@ fun p_file env (ds, ps) =
         val rfcFmt = "%a, %d %b %Y %H:%M:%S"
     in
         box [string "#include \"",
-             string (OS.Path.joinDirFile {dir = Config.includ,
+             string (OS.Path.joinDirFile {dir = !Settings.configInclude,
                                           file = "config.h"}),
              string "\"",
              newline,
@@ -3236,7 +3262,7 @@ fun p_file env (ds, ps) =
                                                string "\"",
                                                newline]) (Settings.getHeaders ()),
              string "#include \"",
-             string (OS.Path.joinDirFile {dir = Config.includ,
+             string (OS.Path.joinDirFile {dir = !Settings.configInclude,
                                           file = "urweb.h"}),
              string "\"",
              newline,
@@ -3407,7 +3433,9 @@ fun p_file env (ds, ps) =
              newline,
              string "uw_clear_headers(ctx);",
              newline,
-             string "uw_write_header(ctx, \"HTTP/1.1 404 Not Found\\r\\nContent-type: text/plain\\r\\n\");",
+             string "uw_write_header(ctx, uw_supports_direct_status ? \"HTTP/1.1 404 Not Found\\r\\n\" : \"Status: 404 Not Found\\r\\n\");",
+             newline,
+             string "uw_write_header(ctx, \"Content-type: text/plain\\r\\n\");",
              newline,
              string "uw_write(ctx, \"Not Found\");",
              newline,
@@ -3477,6 +3505,13 @@ fun p_file env (ds, ps) =
                                 else
                                     box [string "uw_cutErrorLocation(msg);",
                                          newline],
+                                if !hasJs then
+                                    box [string "uw_set_script_header(ctx, \"",
+                                         string allScripts,
+                                         string "\");",
+                                         newline]
+                                else
+                                    box [],
                                 box [string "uw_write(ctx, ",
                                      p_enamed env n,
                                      string "(ctx, msg, 0));",

@@ -27,6 +27,22 @@
 
 structure Settings :> SETTINGS = struct
 
+val configBin = ref Config.bin
+val configLib = ref Config.lib
+val configSrcLib = ref Config.srclib
+val configInclude = ref Config.includ
+val configSitelisp = ref Config.sitelisp
+
+fun libUr () = OS.Path.joinDirFile {dir = !configSrcLib,
+                                    file = "ur"}
+fun libC () = OS.Path.joinDirFile {dir = !configSrcLib,
+                                   file = "c"}
+fun libJs () = OS.Path.joinDirFile {dir = !configSrcLib,
+                                    file = "js"}
+
+fun libFile s = OS.Path.joinDirFile {dir = libUr (),
+                                     file = s}
+
 val urlPrefixFull = ref "/"
 val urlPrefix = ref "/"
 val urlPrePrefix = ref ""
@@ -286,6 +302,8 @@ val jsFuncsBase = basisM [("alert", "alert"),
                           ("toSeconds", "toSeconds"),
                           ("addSeconds", "addSeconds"),
                           ("diffInSeconds", "diffInSeconds"),
+                          ("toMilliseconds", "toMilliseconds"),
+                          ("diffInMilliseconds", "diffInMilliseconds"),
 
                           ("onClick", "uw_onClick"),
                           ("onDblclick", "uw_onDblclick"),
@@ -297,7 +315,11 @@ val jsFuncsBase = basisM [("alert", "alert"),
                           ("preventDefault", "uw_preventDefault"),
                           ("stopPropagation", "uw_stopPropagation"),
 
-                          ("fresh", "fresh")]
+                          ("fresh", "fresh"),
+
+                          ("atom", "atom"),
+                          ("css_url", "css_url"),
+                          ("property", "property")]
 val jsFuncs = ref jsFuncsBase
 fun setJsFuncs ls = jsFuncs := foldl (fn ((k, v), m) => M.insert (m, k, v)) jsFuncsBase ls
 fun jsFunc x = M.find (!jsFuncs, x)
@@ -308,7 +330,7 @@ datatype action = Allow | Deny
 type rule = { action : action, kind : pattern_kind, pattern : string }
 
 datatype path_kind = Any | Url | Table | Sequence | View | Relation | Cookie | Style
-type rewrite = { pkind : path_kind, kind : pattern_kind, from : string, to : string }
+type rewrite = { pkind : path_kind, kind : pattern_kind, from : string, to : string, hyphenate : bool }
 
 val rewrites = ref ([] : rewrite list)
 
@@ -339,7 +361,15 @@ fun rewrite pk s =
                     if subsume (pk, #pkind rewr) then
                         case match () of
                             NONE => rew ls
-                          | SOME suffixStart => #to rewr ^ String.extract (s, suffixStart, NONE)
+                          | SOME suffixStart =>
+                            let
+                                val s = #to rewr ^ String.extract (s, suffixStart, NONE)
+                            in
+                                if #hyphenate rewr then
+                                    String.translate (fn #"_" => "-" | ch => str ch) s
+                                else
+                                    s
+                            end
                     else
                         rew ls
                 end
@@ -406,7 +436,7 @@ val protocols = ref ([] : protocol list)
 fun addProtocol p = protocols := p :: !protocols
 fun getProtocol s = List.find (fn p => #name p = s) (!protocols)
 
-fun clibFile s = OS.Path.joinDirFile {dir = Config.libC,
+fun clibFile s = OS.Path.joinDirFile {dir = libC (),
                                       file = s}
 
 val curProto = ref {name = "",
@@ -467,6 +497,7 @@ datatype failure_mode = Error | None
 
 type dbms = {
      name : string,
+     randomFunction : string,
      header : string,
      link : string,
      p_sql_type : sql_type -> string,
@@ -511,6 +542,7 @@ type dbms = {
 
 val dbmses = ref ([] : dbms list)
 val curDb = ref ({name = "",
+                  randomFunction = "",
                   header = "",
                   link = "",
                   p_sql_type = fn _ => "",

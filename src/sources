@@ -78,6 +78,9 @@ disjoint.sml
 elab_err.sig
 elab_err.sml
 
+mod_db.sig
+mod_db.sml
+
 elaborate.sig
 elaborate.sml
 
@@ -179,6 +182,8 @@ mono_shake.sml
 
 fuse.sig
 fuse.sml
+
+sql.sml
 
 iflow.sig
 iflow.sml

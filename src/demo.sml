@@ -103,6 +103,7 @@ fun make' {prefix, dirname, guided} =
             profile = false,
             ffi = [],
             link = [],
+            linker = NONE,
             headers = [],
             scripts = [],
             clientToServer = [],
@@ -319,7 +320,7 @@ fun make' {prefix, dirname, guided} =
                                              val cmd = "emacs --eval \"(progn "
                                                        ^ "(global-font-lock-mode t) "
                                                        ^ "(add-to-list 'load-path \\\""
-                                                       ^ Config.sitelisp
+                                                       ^ !Settings.configSitelisp
                                                        ^ "/\\\") "
                                                        ^ "(load \\\"urweb-mode-startup\\\") "
                                                        ^ "(urweb-mode) "
@@ -423,6 +424,10 @@ fun make' {prefix, dirname, guided} =
                            | Settings.Prefix => TextIO.output (outf, "*");
                          TextIO.output (outf, " ");
                          TextIO.output (outf, #to rule);
+                         if #hyphenate rule then
+                             TextIO.output (outf, " [-]")
+                         else
+                             ();
                          TextIO.output (outf, "\n"))) (#rewrites combined);
                 filters "url" (#filterUrl combined);
                 filters "mime" (#filterMime combined);

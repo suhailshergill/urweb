@@ -161,6 +161,8 @@ val addSeconds : time -> int -> time
 val toSeconds : time -> int
 val diffInSeconds : time -> time -> int
 (* Earlier time first *)
+val toMilliseconds : time -> int
+val diffInMilliseconds : time -> time -> int
 val timef : string -> time -> string (* Uses strftime() format string *)
 val readUtc : string -> option time
 
@@ -399,7 +401,7 @@ val sql_query1 : free ::: {{Type}}
                                             selectedExps) }
                  -> sql_query1 free afree tables selectedFields selectedExps
 
-type sql_relop 
+type sql_relop
 val sql_union : sql_relop
 val sql_intersect : sql_relop
 val sql_except : sql_relop
@@ -428,11 +430,13 @@ val sql_order_by_Cons : tables ::: {{Type}} -> exps ::: {Type} -> t ::: Type
                         -> sql_exp tables [] exps t -> sql_direction
                         -> sql_order_by tables exps
                         -> sql_order_by tables exps
+val sql_order_by_random : tables ::: {{Type}} -> exps ::: {Type}
+                          -> sql_order_by tables exps
 
 type sql_limit
 val sql_no_limit : sql_limit
 val sql_limit : int -> sql_limit
-                       
+
 type sql_offset
 val sql_no_offset : sql_offset
 val sql_offset : int -> sql_offset
@@ -632,6 +636,17 @@ val classes : css_class -> css_class -> css_class
 (* The equivalent of writing one class after the other, separated by a space, in
  * an HTML 'class' attribute *)
 
+type css_value
+val atom : string -> css_value
+type url
+val css_url : url -> css_value
+type css_property
+val property : string -> css_property
+val value : css_property -> css_value -> css_property
+type css_style
+val noStyle : css_style
+val oneProperty : css_style -> css_property -> css_style
+
 con tag :: {Type} -> {Unit} -> {Unit} -> {Type} -> {Type} -> Type
 
 con xml :: {Unit} -> {Type} -> {Type} -> Type
@@ -644,14 +659,16 @@ val tag : attrsGiven ::: {Type} -> attrsAbsent ::: {Type}
           -> [attrsGiven ~ attrsAbsent] =>
              [useOuter ~ useInner] =>
              [bindOuter ~ bindInner] =>
-           option css_class
+           css_class
 	   -> option (signal css_class)
+           -> css_style
+	   -> option (signal css_style)
            -> $attrsGiven
            -> tag (attrsGiven ++ attrsAbsent)
                   ctxOuter ctxInner useOuter bindOuter
            -> xml ctxInner useInner bindInner
            -> xml ctxOuter (useOuter ++ useInner) (bindOuter ++ bindInner)
-val join : ctx ::: {Unit} 
+val join : ctx ::: {Unit}
         -> use1 ::: {Type} -> bind1 ::: {Type} -> bind2 ::: {Type}
         -> [use1 ~ bind1] => [bind1 ~ bind2] =>
               xml ctx use1 bind1
@@ -691,7 +708,6 @@ con xform = xml form [] []
 type queryString
 val show_queryString : show queryString
 
-type url
 val show_url : show url
 val bless : string -> url
 val checkUrl : string -> option url
@@ -712,7 +728,7 @@ val head : unit -> tag [] html head [] []
 val title : unit -> tag [] head [] [] []
 val link : unit -> tag [Id = id, Rel = string, Typ = string, Href = url, Media = string] head [] [] []
 
-val body : unit -> tag [Onload = transaction unit, Onresize = transaction unit, Onunload = transaction unit]
+val body : unit -> tag [Onload = transaction unit, Onresize = transaction unit, Onunload = transaction unit, Onhashchange = transaction unit]
                        html body [] []
 con bodyTag = fn (attrs :: {Type}) =>
                  ctx ::: {Unit} ->
@@ -734,8 +750,9 @@ con keyEvents = [Onkeydown = int -> transaction unit, Onkeypress = int -> transa
                  Onkeyup = int -> transaction unit]
 (* Key arguments are character codes. *)
 con resizeEvents = [Onresize = transaction unit]
+con scrollEvents = [Onscroll = transaction unit]
 
-con boxEvents = focusEvents ++ mouseEvents ++ keyEvents ++ resizeEvents
+con boxEvents = focusEvents ++ mouseEvents ++ keyEvents ++ resizeEvents ++ scrollEvents
 con tableEvents = focusEvents ++ mouseEvents ++ keyEvents
 
 con boxAttrs = [Id = id, Title = string] ++ boxEvents
@@ -769,13 +786,13 @@ val a : bodyTag ([Link = transaction page, Href = url, Target = string] ++ boxAt
 val img : bodyTag ([Alt = string, Src = url, Width = int, Height = int,
                     Onabort = transaction unit, Onerror = transaction unit,
                     Onload = transaction unit] ++ boxAttrs)
-          
+
 val form : ctx ::: {Unit} -> bind ::: {Type}
            -> [[MakeForm, Form] ~ ctx] =>
     option css_class
     -> xml ([Form] ++ ctx) [] bind
     -> xml ([MakeForm] ++ ctx) [] []
-       
+
 val subform : ctx ::: {Unit} -> use ::: {Type} -> bind ::: {Type}
               -> [[Form] ~ ctx] =>
     nm :: Name -> [[nm] ~ use] =>
@@ -799,7 +816,7 @@ con formTag = fn (ty :: Type) (inner :: {Unit}) (attrs :: {Type}) =>
                         nm :: Name -> unit
                         -> tag attrs ([Form] ++ ctx) inner [] [nm = ty]
 val hidden : formTag string [] [Id = string, Value = string]
-val textbox : formTag string [] ([Value = string, Size = int, Source = source string, Onchange = transaction unit,
+val textbox : formTag string [] ([Value = string, Size = int, Placeholder = string, Source = source string, Onchange = transaction unit,
                                   Ontext = transaction unit] ++ boxAttrs)
 val password : formTag string [] ([Value = string, Size = int] ++ boxAttrs)
 val textarea : formTag string [] ([Rows = int, Cols = int, Onchange = transaction unit,
@@ -826,7 +843,7 @@ val postType : postBody -> string
 val postData : postBody -> string
 
 con radio = [Body, Radio]
-val radio : formTag string radio [Id = id]
+val radio : formTag (option string) radio [Id = id]
 val radioOption : unit -> tag ([Value = string, Checked = bool] ++ boxAttrs) radio [] [] []
 
 con select = [Select]
@@ -855,7 +872,7 @@ con cformTag = fn (attrs :: {Type}) (inner :: {Unit}) =>
                   -> [[Body] ~ ctx] =>
                         unit -> tag attrs ([Body] ++ ctx) inner [] []
 
-val ctextbox : cformTag ([Value = string, Size = int, Source = source string, Onchange = transaction unit,
+val ctextbox : cformTag ([Value = string, Size = int, Source = source string, Placeholder = string, Onchange = transaction unit,
                           Ontext = transaction unit] ++ boxAttrs) []
 val button : cformTag ([Value = string] ++ boxAttrs) []
 

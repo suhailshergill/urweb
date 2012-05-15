@@ -1,14 +1,14 @@
 ACLOCAL_AMFLAGS = -I m4
 
-BIN      := @BIN@
-LIB      := @LIB@
-INCLUDE  := @INCLUDE@
-SITELISP := @SITELISP@
-VERSION  := @VERSION@
+BIN      = @BIN@
+SRCLIB   = @SRCLIB@
+INCLUDE  = @INCLUDE@
+SITELISP = @SITELISP@
+VERSION  = @VERSION@
 
-LIB_UR   := $(LIB)/ur
-LIB_C    := $(LIB)/c
-LIB_JS   := $(LIB)/js
+LIB_UR   = $(SRCLIB)/ur
+LIB_C    = $(SRCLIB)/c
+LIB_JS   = $(SRCLIB)/js
 
 all-local: smlnj mlton
 
@@ -45,7 +45,7 @@ src/urweb.mlton.lex.sml: src/urweb.mlton.lex
 src/urweb.mlton.grm.sig src/urweb.mlton.grm.sml: src/urweb.mlton.grm
 	mlyacc $<
 
-MLTON := mlton
+MLTON = mlton
 
 #ifdef DEBUG
 #	MLTON += -const 'Exn.keepHistory true'
@@ -75,15 +75,14 @@ endif
 
 install-exec-local-main:
 	mkdir -p $(DESTDIR)$(BIN)
-	cp bin/urweb $(DESTDIR)$(BIN)/
+	install bin/urweb $(DESTDIR)$(BIN)/
 	mkdir -p $(DESTDIR)$(LIB_UR)
 	cp lib/ur/*.urs $(DESTDIR)$(LIB_UR)/
 	cp lib/ur/*.ur $(DESTDIR)$(LIB_UR)/
 	mkdir -p $(DESTDIR)$(LIB_JS)
 	cp lib/js/*.js $(DESTDIR)$(LIB_JS)/
 	mkdir -p $(DESTDIR)$(INCLUDE)
-	cp config.h $(DESTDIR)$(INCLUDE)/
-	cp include/*.h $(DESTDIR)$(INCLUDE)/
+	cp include/urweb/*.h $(DESTDIR)$(INCLUDE)/
 
 install-exec-local: install-exec-local-main install-exec-emacs
 	-ldconfig

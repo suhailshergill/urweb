@@ -1,4 +1,4 @@
-(* Copyright (c) 2008-2011, Adam Chlipala
+(* Copyright (c) 2008-2012, Adam Chlipala
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -39,6 +39,10 @@
  open ElabErr
 
  val dumpTypes = ref false
+ val dumpTypesOnError = ref false
+ val unifyMore = ref false
+ val incremental = ref false
+ val verbose = ref false
 
  structure IS = IntBinarySet
  structure IM = IntBinaryMap
@@ -86,11 +90,11 @@
 
  and validateKind env k = validateCon env (L'.CRecord (k, []), ErrorMsg.dummySpan)
 
- exception KUnify' of kunify_error
+ exception KUnify' of E.env * kunify_error
 
  fun unifyKinds' env (k1All as (k1, _)) (k2All as (k2, _)) =
      let
-         fun err f = raise KUnify' (f (k1All, k2All))
+         fun err f = raise KUnify' (env, f (k1All, k2All))
      in
          case (k1, k2) of
              (L'.KType, L'.KType) => ()
@@ -179,16 +183,16 @@
            | _ => err KIncompatible
      end
 
- exception KUnify of L'.kind * L'.kind * kunify_error
+ exception KUnify of L'.kind * L'.kind * E.env * kunify_error
 
  fun unifyKinds env k1 k2 =
      unifyKinds' env k1 k2
-     handle KUnify' err => raise KUnify (k1, k2, err)
+     handle KUnify' (env', err) => raise KUnify (k1, k2, env', err)
 
  fun checkKind env c k1 k2 =
      unifyKinds env k1 k2
-     handle KUnify (k1, k2, err) =>
-            conError env (WrongKind (c, k1, k2, err))
+     handle KUnify (k1, k2, env', err) =>
+            conError env (WrongKind (c, k1, k2, env', err))
 
  val dummy = ErrorMsg.dummySpan
 
@@ -393,11 +397,10 @@
                                         | SOME sgn => ((L'.StrProj (str, m), loc), sgn))
                                    ((L'.StrVar n, loc), sgn) ms
 
-                  val k = case E.projectCon env {sgn = sgn, str = str, field = s} of
-                              NONE => (conError env (UnboundCon (loc, s));
-                                       kerror)
-                            | SOME (k, _) => k
-                 val (c, k) = elabConHead env (L'.CModProj (n, ms, s), loc) k
+                  val (c, k) = case E.projectCon env {sgn = sgn, str = str, field = s} of
+                                   NONE => (conError env (UnboundCon (loc, s));
+                                            (cerror, kerror))
+                                 | SOME (k, _) => elabConHead env (L'.CModProj (n, ms, s), loc) k
               in
                   (c, k, [])
               end)
@@ -564,7 +567,7 @@
                    con = fn L'.CUnif (_, _, _, _, r') => r = r'
                           | _ => false}
 
- exception CUnify' of cunify_error
+ exception CUnify' of E.env * cunify_error
 
  type record_summary = {
       fields : (L'.con * L'.con) list,
@@ -590,7 +593,7 @@
 
  fun p_summary env s = p_con env (summaryToCon s)
 
- exception CUnify of L'.con * L'.con * cunify_error
+ exception CUnify of L'.con * L'.con * E.env * cunify_error
 
  fun kindof env (c, loc) =
      case c of
@@ -619,7 +622,7 @@
          (case hnormKind (kindof env c) of
               (L'.KArrow (_, k), _) => k
             | (L'.KError, _) => kerror
-            | k => raise CUnify' (CKindof (k, c, "arrow")))
+            | k => raise CUnify' (env, CKindof (k, c, "arrow")))
        | L'.CAbs (x, k, c) => (L'.KArrow (k, kindof (E.pushCRel env x k) c), loc)
 
 
@@ -654,7 +657,7 @@
                        r := L'.KKnown k;
                        k
                    end)
-            | k => raise CUnify' (CKindof (k, c, "tuple")))
+            | k => raise CUnify' (env, CKindof (k, c, "tuple")))
 
        | L'.CError => kerror
        | L'.CUnif (_, _, k, _, _) => k
@@ -663,7 +666,7 @@
        | L'.CKApp (c, k) =>
          (case hnormKind (kindof env c) of
               (L'.KFun (_, k'), _) => subKindInKind (0, k) k'
-            | k => raise CUnify' (CKindof (k, c, "kapp")))
+            | k => raise CUnify' (env, CKindof (k, c, "kapp")))
        | L'.TKFun _ => ktype
 
  exception GuessFailure
@@ -759,7 +762,7 @@
                      r := L'.KKnown (L'.KRecord k, #2 c);
                      k
                  end
-               | k => raise CUnify' (CKindof (k, c, "record"))
+               | k => raise CUnify' (env, CKindof (k, c, "record"))
 
          val k1 = rkindof c1
          val k2 = rkindof c2
@@ -988,10 +991,10 @@
                                  findPointwise fs1
                              else
                                  SOME (nm1, c1, c2, (unifyCons env loc c1 c2; NONE)
-                                                    handle CUnify (_, _, err) => (reducedSummaries := NONE;
-                                                                                  SOME err))
+                                                    handle CUnify (_, _, env', err) => (reducedSummaries := NONE;
+                                                                                        SOME (env', err)))
              in
-                 raise CUnify' (CRecordFailure (unsummarize s1, unsummarize s2, findPointwise (#fields s1)))
+                 raise CUnify' (env, CRecordFailure (unsummarize s1, unsummarize s2, findPointwise (#fields s1)))
              end
 
          fun default () = if !mayDelay then
@@ -1010,7 +1013,7 @@
               in
                   if occursCon r c then
                       (reducedSummaries := NONE;
-                       raise CUnify' (COccursCheckFailed (cr, c)))
+                       raise CUnify' (env, COccursCheckFailed (cr, c)))
                   else
                       let
                           val sq = squish nl c
@@ -1028,7 +1031,7 @@
               in
                   if occursCon r c then
                       (reducedSummaries := NONE;
-                       raise CUnify' (COccursCheckFailed (cr, c)))
+                       raise CUnify' (env, COccursCheckFailed (cr, c)))
                   else
                       let
                           val sq = squish nl c
@@ -1120,7 +1123,7 @@
 
  and unifyCons'' env loc (c1All as (c1, _)) (c2All as (c2, _)) =
      let
-         fun err f = raise CUnify' (f (c1All, c2All))
+         fun err f = raise CUnify' (env, f (c1All, c2All))
 
          fun projSpecial1 (c1, n1, onFail) =
              let
@@ -1345,18 +1348,18 @@
 
  and unifyCons env loc c1 c2 =
      unifyCons' env loc c1 c2
-     handle CUnify' err => raise CUnify (c1, c2, err)
-          | KUnify args => raise CUnify (c1, c2, CKind args)
+     handle CUnify' (env', err) => raise CUnify (c1, c2, env', err)
+          | KUnify (arg as {3 = env', ...}) => raise CUnify (c1, c2, env', CKind arg)
 
  fun checkCon env e c1 c2 =
      unifyCons env (#2 e) c1 c2
-     handle CUnify (c1, c2, err) =>
-            expError env (Unify (e, c1, c2, err))
+     handle CUnify (c1, c2, env', err) =>
+            expError env (Unify (e, c1, c2, env', err))
 
  fun checkPatCon env p c1 c2 =
      unifyCons env (#2 p) c1 c2
-     handle CUnify (c1, c2, err) =>
-            expError env (PatUnify (p, c1, c2, err))
+     handle CUnify (c1, c2, env', err) =>
+            expError env (PatUnify (p, c1, c2, env', err))
 
  fun primType env p =
      case p of
@@ -2580,7 +2583,7 @@ fun elabSgn_item ((sgi, loc), (env, denv, gs)) =
              val (env', n) = E.pushENamed env x c'
          in
              (unifyKinds env ck ktype
-              handle KUnify ue => strError env (NotType (loc, ck, ue)));
+              handle KUnify arg => strError env (NotType (loc, ck, arg)));
 
              ([(L'.SgiVal (x, n, c'), loc)], (env', denv, gs' @ gs))
          end
@@ -3057,9 +3060,9 @@ and subSgn' counterparts env strLoc sgn1 (sgn2 as (_, loc2)) =
                                          if x = x' then
                                              let
                                                  val () = unifyKinds env k1 k2
-                                                     handle KUnify (k1, k2, err) =>
+                                                     handle KUnify (k1, k2, env', err) =>
                                                             sgnError env (SgiWrongKind (loc, sgi1All, k1,
-                                                                                        sgi2All, k2, err))
+                                                                                        sgi2All, k2, env', err))
                                                  val env = E.pushCNamedAs env x n1 k1 co1
                                              in
                                                  SOME (if n1 = n2 then
@@ -3126,9 +3129,9 @@ and subSgn' counterparts env strLoc sgn1 (sgn2 as (_, loc2)) =
                                              in
                                                  (unifyCons env loc c1 c2;
                                                   good ())
-                                                 handle CUnify (c1, c2, err) =>
+                                                 handle CUnify (c1, c2, env', err) =>
                                                         (sgnError env (SgiWrongCon (loc, sgi1All, c1,
-                                                                                    sgi2All, c2, err));
+                                                                                    sgi2All, c2, env', err));
                                                          good ())
                                              end
                                          else
@@ -3252,8 +3255,8 @@ and subSgn' counterparts env strLoc sgn1 (sgn2 as (_, loc2)) =
                                          in
                                              (unifyCons env loc t1 t2;
                                               good ())
-                                             handle CUnify (c1, c2, err) =>
-                                                    (sgnError env (SgiWrongCon (loc, sgi1All, c1, sgi2All, c2, err));
+                                             handle CUnify (c1, c2, env', err) =>
+                                                    (sgnError env (SgiWrongCon (loc, sgi1All, c1, sgi2All, c2, env', err));
                                                      good ())
                                          end
                                      else
@@ -3273,8 +3276,8 @@ and subSgn' counterparts env strLoc sgn1 (sgn2 as (_, loc2)) =
                                                           ("c2'", p_con env (sub2 c2))];*)
                                           unifyCons env loc c1 (sub2 c2);
                                           SOME env)
-                                         handle CUnify (c1, c2, err) =>
-                                                (sgnError env (SgiWrongCon (loc, sgi1All, c1, sgi2All, c2, err));
+                                         handle CUnify (c1, c2, env', err) =>
+                                                (sgnError env (SgiWrongCon (loc, sgi1All, c1, sgi2All, c2, env', err));
                                                  SOME env)
                                      else
                                          NONE
@@ -3341,9 +3344,9 @@ and subSgn' counterparts env strLoc sgn1 (sgn2 as (_, loc2)) =
                                          if x = x' then
                                              let
                                                  val () = unifyKinds env k1 k2
-                                                     handle KUnify (k1, k2, err) =>
+                                                     handle KUnify (k1, k2, env', err) =>
                                                             sgnError env (SgiWrongKind (loc, sgi1All, k1,
-                                                                                        sgi2All, k2, err))
+                                                                                        sgi2All, k2, env', err))
 
                                                  val env = E.pushCNamedAs env x n1 k1 co
                                              in
@@ -3368,9 +3371,9 @@ and subSgn' counterparts env strLoc sgn1 (sgn2 as (_, loc2)) =
                                          if x = x' then
                                              let
                                                  val () = unifyKinds env k1 k2
-                                                     handle KUnify (k1, k2, err) =>
+                                                     handle KUnify (k1, k2, env', err) =>
                                                             sgnError env (SgiWrongKind (loc, sgi1All, k1,
-                                                                                        sgi2All, k2, err))
+                                                                                        sgi2All, k2, env', err))
 
                                                  val c2 = sub2 c2
 
@@ -3388,9 +3391,9 @@ and subSgn' counterparts env strLoc sgn1 (sgn2 as (_, loc2)) =
                                              in
                                                  (unifyCons env loc c1 c2;
                                                   good ())
-                                                 handle CUnify (c1, c2, err) =>
+                                                 handle CUnify (c1, c2, env', err) =>
                                                         (sgnError env (SgiWrongCon (loc, sgi1All, c1,
-                                                                                    sgi2All, c2, err));
+                                                                                    sgi2All, c2, env', err));
                                                          good ())
                                              end
                                          else
@@ -3641,7 +3644,7 @@ and wildifyStr env (str, sgn) =
                                  | L.DClass (x, _, _) => ndelCon (nd, x)
                                  | L.DVal (x, _, _) => ndelVal (nd, x)
                                  | L.DOpen _ => nempty
-                                 | L.DStr (x, _, (L.StrConst ds', _)) =>
+                                 | L.DStr (x, _, _, (L.StrConst ds', _)) =>
                                    (case SM.find (nmods nd, x) of
                                         NONE => nd
                                       | SOME (env, nd') => naddMod (nd, x, (env, removeUsed (nd', ds'))))
@@ -3711,11 +3714,11 @@ and wildifyStr env (str, sgn) =
 
                          val ds = ds @ ds'
                      in
-                         map (fn d as (L.DStr (x, s, (L.StrConst ds', loc')), loc) =>
+                         map (fn d as (L.DStr (x, s, tm, (L.StrConst ds', loc')), loc) =>
                                  (case SM.find (nmods nd, x) of
                                       NONE => d
                                     | SOME (env, nd') =>
-                                      (L.DStr (x, s, (L.StrConst (extend (env, nd', ds')), loc')), loc))
+                                      (L.DStr (x, s, tm, (L.StrConst (extend (env, nd', ds')), loc')), loc))
                                | d => d) ds
                      end
              in
@@ -3911,8 +3914,11 @@ and elabDecl (dAll as (d, loc), (env, denv, gs)) =
                                                                   expError env (IllegalRec (x, e'));
                                                               ((x, n, c', e'), gs1 @ gs)
                                                           end) gs vis
+
+                    val vis = map (fn (x, n, t, e) => (x, n, normClassConstraint env t, e)) vis
+                    val d = (L'.DValRec vis, loc)
                 in
-                    ([(L'.DValRec vis, loc)], (env, denv, gs))
+                    ([d], (E.declBinds env d, denv, gs))
                 end
 
               | L.DSgn (x, sgn) =>
@@ -3923,56 +3929,83 @@ and elabDecl (dAll as (d, loc), (env, denv, gs)) =
                     ([(L'.DSgn (x, n, sgn'), loc)], (env', denv, enD gs' @ gs))
                 end
 
-              | L.DStr (x, sgno, str) =>
-                let
-                    val () = if x = "Basis" then
-                                 raise Fail "Not allowed to redefine structure 'Basis'"
-                             else
-                                 ()
+              | L.DStr (x, sgno, tmo, str) =>
+                (case ModDb.lookup dAll of
+                     SOME d =>
+                     let
+                         val () = if !verbose then TextIO.print ("REUSE: " ^ x ^ "\n") else ()
+                         val env' = E.declBinds env d
+                         val denv' = dopenConstraints (loc, env', denv) {str = x, strs = []}
+                     in
+                         ([d], (env', denv', gs))
+                     end
+                   | NONE =>
+                     let
+                         val () = if !verbose then TextIO.print ("CHECK: " ^ x ^ "\n") else ()
 
-                    val formal = Option.map (elabSgn (env, denv)) sgno
+                         val () = if x = "Basis" then
+                                      raise Fail "Not allowed to redefine structure 'Basis'"
+                                  else
+                                      ()
 
-                    val (str', sgn', gs') =
-                        case formal of
-                            NONE =>
-                            let
-                                val (str', actual, gs') = elabStr (env, denv) str
-                            in
-                                (str', selfifyAt env {str = str', sgn = actual}, gs')
-                            end
-                          | SOME (formal, gs1) =>
-                            let
-                                val str = wildifyStr env (str, formal)
-                                val (str', actual, gs2) = elabStr (env, denv) str
-                            in
-                                subSgn env loc (selfifyAt env {str = str', sgn = actual}) formal;
-                                (str', formal, enD gs1 @ gs2)
-                            end
+                         val formal = Option.map (elabSgn (env, denv)) sgno
 
-                    val (env', n) = E.pushStrNamed env x sgn'
-                    val denv' =
-                        case #1 str' of
-                            L'.StrConst _ => dopenConstraints (loc, env', denv) {str = x, strs = []}
-                          | L'.StrApp _ => dopenConstraints (loc, env', denv) {str = x, strs = []}
-                          | _ => denv
-                in
-                    case #1 (hnormSgn env sgn') of
-                        L'.SgnFun _ =>
-                        (case #1 str' of
-                             L'.StrFun _ => ()
-                           | _ => strError env (FunctorRebind loc))
-                      | _ => ();
-                    ([(L'.DStr (x, n, sgn', str'), loc)], (env', denv', gs' @ gs))
-                end
+                         val (str', sgn', gs') =
+                             case formal of
+                                 NONE =>
+                                 let
+                                     val (str', actual, gs') = elabStr (env, denv) str
+                                 in
+                                     (str', selfifyAt env {str = str', sgn = actual}, gs')
+                                 end
+                               | SOME (formal, gs1) =>
+                                 let
+                                     val str = wildifyStr env (str, formal)
+                                     val (str', actual, gs2) = elabStr (env, denv) str
+                                 in
+                                     subSgn env loc (selfifyAt env {str = str', sgn = actual}) formal;
+                                     (str', formal, enD gs1 @ gs2)
+                                 end
 
-              | L.DFfiStr (x, sgn) =>
-                let
-                    val (sgn', gs') = elabSgn (env, denv) sgn
+                         val (env', n) = E.pushStrNamed env x sgn'
+                         val denv' =
+                             case #1 str' of
+                                 L'.StrConst _ => dopenConstraints (loc, env', denv) {str = x, strs = []}
+                               | L'.StrApp _ => dopenConstraints (loc, env', denv) {str = x, strs = []}
+                               | _ => denv
 
-                    val (env', n) = E.pushStrNamed env x sgn'
-                in
-                    ([(L'.DFfiStr (x, n, sgn'), loc)], (env', denv, enD gs' @ gs))
-                end
+                         val dNew = (L'.DStr (x, n, sgn', str'), loc)
+                     in
+                         case #1 (hnormSgn env sgn') of
+                             L'.SgnFun _ =>
+                             (case #1 str' of
+                                  L'.StrFun _ => ()
+                                | _ => strError env (FunctorRebind loc))
+                           | _ => ();
+                         Option.map (fn tm => ModDb.insert (dNew, tm)) tmo;
+                         ([dNew], (env', denv', gs' @ gs))
+                     end)
+
+              | L.DFfiStr (x, sgn, tmo) =>
+                (case ModDb.lookup dAll of
+                     SOME d =>
+                     let
+                         val env' = E.declBinds env d
+                         val denv' = dopenConstraints (loc, env', denv) {str = x, strs = []}
+                     in
+                         ([d], (env', denv', []))
+                     end
+                   | NONE =>
+                     let
+                         val (sgn', gs') = elabSgn (env, denv) sgn
+                                           
+                         val (env', n) = E.pushStrNamed env x sgn'
+
+                         val dNew = (L'.DFfiStr (x, n, sgn'), loc)
+                     in
+                         Option.map (fn tm => ModDb.insert (dNew, tm)) tmo;
+                         ([dNew], (env', denv, enD gs' @ gs))
+                     end)
 
               | L.DOpen (m, ms) =>
                 (case E.lookupStr env m of
@@ -4431,24 +4464,38 @@ and elabStr (env, denv) (str, loc) =
 
 fun resolveClass env = E.resolveClass (hnormCon env) (consEq env dummy) env
 
-fun elabFile basis topStr topSgn env file =
+fun elabFile basis basis_tm topStr topSgn top_tm env file =
     let
+        val () = ModDb.snapshot ()
+
         val () = mayDelay := true
         val () = delayedUnifs := []
         val () = delayedExhaustives := []
 
-        val (sgn, gs) = elabSgn (env, D.empty) (L.SgnConst basis, ErrorMsg.dummySpan)
-        val () = case gs of
-                     [] => ()
-                   | _ => (app (fn (_, env, _, c1, c2) =>
-                                   prefaces "Unresolved"
-                                   [("c1", p_con env c1),
-                                    ("c2", p_con env c2)]) gs;
-                           raise Fail "Unresolved disjointness constraints in Basis")
+        val d = (L.DFfiStr ("Basis", (L.SgnConst basis, ErrorMsg.dummySpan), SOME basis_tm), ErrorMsg.dummySpan)
+        val (basis_n, env', sgn) =
+            case (if !incremental then ModDb.lookup d else NONE) of
+                NONE =>
+                let
+                    val (sgn, gs) = elabSgn (env, D.empty) (L.SgnConst basis, ErrorMsg.dummySpan)
+                    val () = case gs of
+                                 [] => ()
+                               | _ => (app (fn (_, env, _, c1, c2) =>
+                                               prefaces "Unresolved"
+                                                        [("c1", p_con env c1),
+                                                         ("c2", p_con env c2)]) gs;
+                                       raise Fail "Unresolved disjointness constraints in Basis")
 
-        val (env', basis_n) = E.pushStrNamed env "Basis" sgn
+                    val (env', basis_n) = E.pushStrNamed env "Basis" sgn
+                in
+                    ModDb.insert ((L'.DFfiStr ("Basis", basis_n, sgn), ErrorMsg.dummySpan), basis_tm);
+                    (basis_n, env', sgn)
+                end
+              | SOME (d' as (L'.DFfiStr (_, basis_n, sgn), _)) =>
+                (basis_n, E.pushStrNamedAs env "Basis" basis_n sgn, sgn)
+              | _ => raise Fail "Elaborate: Basis impossible"
+                     
         val () = basis_r := basis_n
-
         val (ds, env') = dopen env' {str = basis_n, strs = [], sgn = sgn}
 
         fun discoverC r x =
@@ -4463,34 +4510,50 @@ fun elabFile basis topStr topSgn env file =
         val () = discoverC char "char"
         val () = discoverC table "sql_table"
 
-        val (topSgn, gs) = elabSgn (env', D.empty) (L.SgnConst topSgn, ErrorMsg.dummySpan)
-        val () = case gs of
-                     [] => ()
-                   | _ => raise Fail "Unresolved disjointness constraints in top.urs"
-        val (topStr, topSgn', gs) = elabStr (env', D.empty) (L.StrConst topStr, ErrorMsg.dummySpan)
-        val () = case gs of
-                     [] => ()
-                   | _ => app (fn Disjoint (loc, env, denv, c1, c2) =>
-                                  (case D.prove env denv (c1, c2, loc) of
-                                       [] => ()
-                                     | _ =>
-                                       (prefaces "Unresolved constraint in top.ur"
-                                                 [("loc", PD.string (ErrorMsg.spanToString loc)),
-                                                  ("c1", p_con env c1),
-                                                  ("c2", p_con env c2)];
-                                        raise Fail "Unresolved constraint in top.ur"))
-                                | TypeClass (env, c, r, loc) =>
-                                  let
-                                      val c = normClassKey env c
-                                  in
-                                      case resolveClass env c of
-                                          SOME e => r := SOME e
-                                        | NONE => expError env (Unresolvable (loc, c))
-                                  end) gs
+        val d = (L.DStr ("Top", SOME (L.SgnConst topSgn, ErrorMsg.dummySpan),
+                         SOME (if Time.< (top_tm, basis_tm) then basis_tm else top_tm),
+                         (L.StrConst topStr, ErrorMsg.dummySpan)), ErrorMsg.dummySpan)
+        val (top_n, env', topSgn, topStr) =
+            case (if !incremental then ModDb.lookup d else NONE) of
+                NONE =>
+                let
+                    val (topSgn, gs) = elabSgn (env', D.empty) (L.SgnConst topSgn, ErrorMsg.dummySpan)
+                    val () = case gs of
+                                 [] => ()
+                               | _ => raise Fail "Unresolved disjointness constraints in top.urs"
+                    val (topStr, topSgn', gs) = elabStr (env', D.empty) (L.StrConst topStr, ErrorMsg.dummySpan)
 
-        val () = subSgn env' ErrorMsg.dummySpan topSgn' topSgn
+                    val () = case gs of
+                                 [] => ()
+                               | _ => app (fn Disjoint (loc, env, denv, c1, c2) =>
+                                              (case D.prove env denv (c1, c2, loc) of
+                                                   [] => ()
+                                                 | _ =>
+                                                   (prefaces "Unresolved constraint in top.ur"
+                                                             [("loc", PD.string (ErrorMsg.spanToString loc)),
+                                                              ("c1", p_con env c1),
+                                                              ("c2", p_con env c2)];
+                                                    raise Fail "Unresolved constraint in top.ur"))
+                                            | TypeClass (env, c, r, loc) =>
+                                              let
+                                                  val c = normClassKey env c
+                                              in
+                                                  case resolveClass env c of
+                                                      SOME e => r := SOME e
+                                                    | NONE => expError env (Unresolvable (loc, c))
+                                              end) gs
 
-        val (env', top_n) = E.pushStrNamed env' "Top" topSgn
+                    val () = subSgn env' ErrorMsg.dummySpan topSgn' topSgn
+
+                    val (env', top_n) = E.pushStrNamed env' "Top" topSgn
+                in
+                    ModDb.insert ((L'.DStr ("Top", top_n, topSgn, topStr), ErrorMsg.dummySpan), top_tm);
+                    (top_n, env', topSgn, topStr)
+                end
+              | SOME (d' as (L'.DStr (_, top_n, topSgn, topStr), _)) =>
+                (top_n, E.declBinds env' d', topSgn, topStr)
+              | _ => raise Fail "Elaborate: Top impossible"                
+
         val () = top_r := top_n
 
         val (ds', env') = dopen env' {str = top_n, strs = [], sgn = topSgn}
@@ -4520,10 +4583,11 @@ fun elabFile basis topStr topSgn env file =
                 end
 
         val checkConstraintErrors = ref (fn () => ())
+        fun stopHere () = not (!unifyMore) andalso ErrorMsg.anyErrors ()
     in
         oneSummaryRound ();
 
-        if ErrorMsg.anyErrors () then
+        if stopHere () then
             ()
         else
             let
@@ -4617,7 +4681,13 @@ fun elabFile basis topStr topSgn env file =
                                                     (!delayedUnifs);*)
                                               end
                                             | TypeClass (env, c, r, loc) =>
-                                              expError env (Unresolvable (loc, c)))
+                                              let
+                                                  val c = normClassKey env c
+                                              in
+                                                  case resolveClass env c of
+                                                      SOME _ => ()
+                                                    | NONE => expError env (Unresolvable (loc, c))
+                                              end)
                                           gs)
                     end
             in
@@ -4626,23 +4696,23 @@ fun elabFile basis topStr topSgn env file =
 
         mayDelay := false;
 
-        if ErrorMsg.anyErrors () then
+        if stopHere () then
             ()
         else
             (app (fn (loc, env, k, s1, s2) =>
                      unifySummaries env (loc, k, normalizeRecordSummary env s1, normalizeRecordSummary env s2)
-                     handle CUnify' err => (ErrorMsg.errorAt loc "Error in final record unification";
-                                            cunifyError env err;
-                                            case !reducedSummaries of
-                                                NONE => ()
-                                              | SOME (s1, s2) =>
-                                                (ErrorMsg.errorAt loc "Stuck unifying these records after canceling matching pieces:";
-                                                 eprefaces' [("Have", s1),
-                                                             ("Need", s2)])))
+                     handle CUnify' (env', err) => (ErrorMsg.errorAt loc "Error in final record unification";
+                                                    cunifyError env' err;
+                                                    case !reducedSummaries of
+                                                        NONE => ()
+                                                      | SOME (s1, s2) =>
+                                                        (ErrorMsg.errorAt loc "Stuck unifying these records after canceling matching pieces:";
+                                                         eprefaces' [("Have", s1),
+                                                                     ("Need", s2)])))
                  (!delayedUnifs);
              delayedUnifs := []);
 
-        if ErrorMsg.anyErrors () then
+        if stopHere () then
             ()
         else
             if List.exists kunifsInDecl file then
@@ -4652,7 +4722,7 @@ fun elabFile basis topStr topSgn env file =
             else
                 ();
         
-        if ErrorMsg.anyErrors () then
+        if stopHere () then
             ()
         else
             if List.exists cunifsInDecl file then
@@ -4662,7 +4732,7 @@ fun elabFile basis topStr topSgn env file =
             else
                 ();
 
-        if ErrorMsg.anyErrors () then
+        if stopHere () then
             ()
         else
             app (fn all as (env, _, _, loc) =>
@@ -4671,18 +4741,20 @@ fun elabFile basis topStr topSgn env file =
                       | SOME p => expError env (Inexhaustive (loc, p)))
                 (!delayedExhaustives);
 
-        if ErrorMsg.anyErrors () then
+        if stopHere () then
             ()
         else
             !checkConstraintErrors ();
 
         (*preface ("file", p_file env' file);*)
 
-        if !dumpTypes then
+        if !dumpTypes orelse (!dumpTypesOnError andalso ErrorMsg.anyErrors ()) then
             let
                 open L'
                 open Print.PD
                 open Print
+
+                fun p_con env c = ElabPrint.p_con env (ElabOps.reduceCon env c)
 
                 fun dumpDecl (d, env) =
                     case #1 d of
@@ -4727,6 +4799,11 @@ fun elabFile basis topStr topSgn env file =
             in
                 ignore (foldl dumpDecl env' file)
             end
+        else
+            ();
+
+        if ErrorMsg.anyErrors () then
+            ModDb.revert ()
         else
             ();
         

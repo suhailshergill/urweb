@@ -40,6 +40,10 @@ local
   val commentLevel = ref 0
   val commentPos = ref 0
 in
+  fun reset () =
+      (commentLevel := 0;
+       commentPos := 0)
+
   fun enterComment pos =
       (if !commentLevel = 0 then
            commentPos := pos
@@ -109,7 +113,8 @@ fun exitBrace () =
 	    braceLevels := (s, i-1) :: rest
       | _ => ()
 
-fun initialize () = (xmlTag := [];
+fun initialize () = (reset ();
+                     xmlTag := [];
 		     xmlString := false)
 
 
@@ -426,7 +431,6 @@ xint = x[0-9a-fA-F][0-9a-fA-F];
 <INITIAL> "end"       => (Tokens.END (pos yypos, pos yypos + size yytext));
 <INITIAL> "functor"   => (Tokens.FUNCTOR (pos yypos, pos yypos + size yytext));
 <INITIAL> "where"     => (Tokens.WHERE (pos yypos, pos yypos + size yytext));
-<INITIAL> "extern"    => (Tokens.EXTERN (pos yypos, pos yypos + size yytext));
 <INITIAL> "include"   => (Tokens.INCLUDE (pos yypos, pos yypos + size yytext));
 <INITIAL> "open"      => (Tokens.OPEN (pos yypos, pos yypos + size yytext));
 <INITIAL> "constraint"=> (Tokens.CONSTRAINT (pos yypos, pos yypos + size yytext));
@@ -490,6 +494,7 @@ xint = x[0-9a-fA-F][0-9a-fA-F];
 
 <INITIAL> "ASC"       => (Tokens.ASC (pos yypos, pos yypos + size yytext));
 <INITIAL> "DESC"      => (Tokens.DESC (pos yypos, pos yypos + size yytext));
+<INITIAL> "RANDOM"    => (Tokens.RANDOM (pos yypos, pos yypos + size yytext));
 
 <INITIAL> "INSERT"    => (Tokens.INSERT (pos yypos, pos yypos + size yytext));
 <INITIAL> "INTO"      => (Tokens.INTO (pos yypos, pos yypos + size yytext));

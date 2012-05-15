@@ -87,7 +87,7 @@ fun p_explicitness e =
 
 fun p_con' par env (c, _) =
     case c of
-        TFun (t1, t2) => parenIf true (box [p_con' true env t1,
+        TFun (t1, t2) => parenIf par (box [p_con' true env t1,
                                            space,
                                            string "->",
                                            space,
@@ -112,14 +112,34 @@ fun p_con' par env (c, _) =
                                                     string "=>",
                                                     space,
                                                     p_con env c3])
-      | TRecord (CRecord (_, xcs), _) => box [string "{",
-                                              p_list (fn (x, c) =>
-                                                         box [p_name env x,
-                                                              space,
-                                                              string ":",
-                                                              space,
-                                                              p_con env c]) xcs,
-                                              string "}"]
+      | TRecord (CRecord (_, xcs), _) =>
+        let
+            fun isTuple (n, xcs) =
+                case xcs of
+                    [] => n > 2
+                  | ((CName s, _), _) :: xcs' =>
+                    s = Int.toString n andalso isTuple (n+1, xcs')
+                  | _ => false
+        in
+            if isTuple (1, xcs) then
+                case xcs of
+                    (_, c) :: xcs =>
+                    parenIf par (box [p_con' true env c,
+                                      p_list_sep (box []) (fn (_, c) => box [space,
+                                                                             string "*",
+                                                                             space,
+                                                                             p_con' true env c]) xcs])
+                  | _ => raise Fail "ElabPrint: surprise empty tuple"
+            else
+                box [string "{",
+                     p_list (fn (x, c) =>
+                                box [p_name env x,
+                                     space,
+                                     string ":",
+                                     space,
+                                     p_con env c]) xcs,
+                     string "}"]
+        end
       | TRecord c => box [string "$",
                           p_con' true env c]
 
@@ -145,7 +165,20 @@ fun p_con' par env (c, _) =
                       else
                           m1x
         in
-            p_list_sep (string ".") string (m1x :: ms @ [x])
+            if m1x = "Basis" andalso (case E.lookupC env x of
+                                          E.Named (n, _) =>
+                                          let
+                                              val (_, _, co) = E.lookupCNamed env n
+                                          in
+                                              case co of
+                                                  SOME (CModProj (m1', [], x'), _) => m1' = m1 andalso x' = x
+                                                | _ => false
+                                          end
+                                        | E.NotBound => true
+                                        | _ => false) then
+                string x
+            else
+                p_list_sep (string ".") string (m1s :: ms @ [x])
         end 
 
       | CApp (c1, c2) => parenIf par (box [p_con env c1,
@@ -169,7 +202,7 @@ fun p_con' par env (c, _) =
         if !debug then
             parenIf par (box [string "[",
                               p_list (fn (x, c) =>
-                                         box [p_con env x,
+                                         box [p_name env x,
                                               space,
                                               string "=",
                                               space,
@@ -179,7 +212,7 @@ fun p_con' par env (c, _) =
         else
             parenIf par (box [string "[",
                               p_list (fn (x, c) =>
-                                         box [p_con env x,
+                                         box [p_name env x,
                                               space,
                                               string "=",
                                               space,

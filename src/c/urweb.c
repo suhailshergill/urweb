@@ -159,13 +159,7 @@ typedef struct client {
 static client **clients, *clients_free, *clients_used;
 static unsigned n_clients;
 
-static pthread_mutex_t clients_mutex =
-    #ifdef PTHREAD_RECURSIVE_MUTEX_INITIALIZER
-        PTHREAD_RECURSIVE_MUTEX_INITIALIZER
-    #else
-        PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP
-    #endif
-    ;
+static pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
 size_t uw_messages_max = SIZE_MAX;
 size_t uw_clients_max = SIZE_MAX;
 
@@ -230,20 +224,23 @@ static void release_client(client *c) {
 }
 
 static const char begin_msgs[] = "Content-type: text/plain\r\n\r\n";
+static pthread_t pruning_thread;
+static int pruning_thread_initialized = 0;
 
 static client *find_client(unsigned id) {
   client *c;
+  int i_am_pruner = pruning_thread_initialized && pthread_equal(pruning_thread, pthread_self());
 
-  pthread_mutex_lock(&clients_mutex);
+  if (!i_am_pruner) pthread_mutex_lock(&clients_mutex);
 
   if (id >= n_clients) {
-    pthread_mutex_unlock(&clients_mutex);
+    if (!i_am_pruner) pthread_mutex_unlock(&clients_mutex);
     return NULL;
   }
 
   c = clients[id];
 
-  pthread_mutex_unlock(&clients_mutex);
+  if (!i_am_pruner) pthread_mutex_unlock(&clients_mutex);
   return c;
 }
 
@@ -1313,10 +1310,6 @@ void uw_write_script(uw_context ctx, uw_Basis_string s) {
   uw_check_script(ctx, len + 1);
   strcpy(ctx->script.front, s);
   ctx->script.front += len;
-}
-
-const char *uw_Basis_get_script(uw_context ctx, uw_unit u) {
-  return "<sc>";
 }
 
 const char *uw_get_real_script(uw_context ctx) {
@@ -2429,7 +2422,7 @@ uw_Basis_string uw_Basis_sqlifyString(uw_context ctx, uw_Basis_string s) {
         s2 += 4;
       }
       else
-        uw_error(ctx, FATAL, "Non-printable character %u in string to SQLify", c);
+        *s2++ = c; // I hope this is safe to do... don't know how to support UTF-8 outside Postgres otherwise!
     }
   }
 
@@ -3160,6 +3153,8 @@ int uw_rollback(uw_context ctx, int will_retry) {
   return ctx->app ? ctx->app->db_rollback(ctx) : 0;
 }
 
+static const char begin_xhtml[] = "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"en\" lang=\"en\">";
+
 void uw_commit(uw_context ctx) {
   int i;
 
@@ -3210,39 +3205,78 @@ void uw_commit(uw_context ctx) {
     if (ctx->transactionals[i].free)
       ctx->transactionals[i].free(ctx->transactionals[i].data, 0);
 
-  if (*ctx->page.front)
-    uw_writec(ctx, 0);
+  uw_check(ctx, 1);
+  *ctx->page.front = 0;
 
-  // Splice script data into appropriate part of page
-  if (ctx->returning_indirectly || ctx->script_header[0] == 0) {
-    char *start = strstr(ctx->page.start, "<sc>");
-    if (start) {
-      memmove(start, start + 4, uw_buffer_used(&ctx->page) - (start - ctx->page.start) - 4);
-      ctx->page.front -= 4;
-    }
-  } else if (uw_buffer_used(&ctx->script) == 0) {
-    size_t len = strlen(ctx->script_header);
-    char *start = strstr(ctx->page.start, "<sc>");
-    if (start) {
-      ctx_uw_buffer_check(ctx, "page", &ctx->page, uw_buffer_used(&ctx->page) - 4 + len);
-      start = strstr(ctx->page.start, "<sc>");
-      memmove(start + len, start + 4, uw_buffer_used(&ctx->page) - (start - ctx->page.start) - 3);
-      ctx->page.front += len - 4;
-      memcpy(start, ctx->script_header, len);
-    }
-  } else {
-    size_t lenH = strlen(ctx->script_header), len = uw_buffer_used(&ctx->script);
-    size_t lenP = lenH + 40 + len;
-    char *start = strstr(ctx->page.start, "<sc>");
-    if (start) {
-      ctx_uw_buffer_check(ctx, "page", &ctx->page, uw_buffer_used(&ctx->page) - 4 + lenP);
-      start = strstr(ctx->page.start, "<sc>");
-      memmove(start + lenP, start + 4, uw_buffer_used(&ctx->page) - (start - ctx->page.start) - 3);
-      ctx->page.front += lenP - 4;
-      memcpy(start, ctx->script_header, lenH);
-      memcpy(start + lenH, "<script type=\"text/javascript\">", 31);
-      memcpy(start + lenH + 31, ctx->script.start, len);
-      memcpy(start + lenH + 31 + len, "</script>", 9);
+  if (!ctx->returning_indirectly && !strncmp(ctx->page.start, begin_xhtml, sizeof begin_xhtml - 1)) {
+    char *s;
+
+    // Splice script data into appropriate part of page, also adding <head> if needed.
+    s = ctx->page.start + sizeof begin_xhtml - 1;
+    s = strchr(s, '<');
+    if (s == NULL) {
+      // Weird.  Document has no tags!
+
+      uw_write(ctx, "<head></head><body></body>");
+      uw_check(ctx, 1);
+      *ctx->page.front = 0;
+    } else if (!strncmp(s, "<head>", 6)) {
+      // <head> is present.  Let's add the <script> tags immediately after it.
+
+      // Any freeform JavaScript to include?
+      if (uw_buffer_used(&ctx->script) > 0) {
+        size_t lenH = strlen(ctx->script_header), len = uw_buffer_used(&ctx->script);
+        size_t lenP = lenH + 40 + len;
+        char *start = s + 6, *oldPage = ctx->page.start;
+
+        ctx_uw_buffer_check(ctx, "page", &ctx->page, uw_buffer_used(&ctx->page) + lenP);
+        start += ctx->page.start - oldPage;
+        memmove(start + lenP, start, uw_buffer_used(&ctx->page) - (start - ctx->page.start) + 1);
+        ctx->page.front += lenP;
+        memcpy(start, ctx->script_header, lenH);
+        memcpy(start + lenH, "<script type=\"text/javascript\">", 31);
+        memcpy(start + lenH + 31, ctx->script.start, len);
+        memcpy(start + lenH + 31 + len, "</script>", 9);
+      } else {
+        size_t lenH = strlen(ctx->script_header);
+        char *start = s + 6, *oldPage = ctx->page.start;
+
+        ctx_uw_buffer_check(ctx, "page", &ctx->page, uw_buffer_used(&ctx->page) + lenH);
+        start += ctx->page.start - oldPage;
+        memmove(start + lenH, start, uw_buffer_used(&ctx->page) - (start - ctx->page.start) + 1);
+        ctx->page.front += lenH;
+        memcpy(start, ctx->script_header, lenH);
+      }
+    } else {
+      // No <head>.  At this point, add it, with <script> tags inside.
+
+      if (uw_buffer_used(&ctx->script) > 0) {
+        size_t lenH = strlen(ctx->script_header), len = uw_buffer_used(&ctx->script);
+        size_t lenP = lenH + 53 + len;
+        char *start = s, *oldPage = ctx->page.start;
+
+        ctx_uw_buffer_check(ctx, "page", &ctx->page, uw_buffer_used(&ctx->page) + lenP);
+        start += ctx->page.start - oldPage;
+        memmove(start + lenP, start, uw_buffer_used(&ctx->page) - (start - ctx->page.start) + 1);
+        ctx->page.front += lenP;
+        memcpy(start, "<head>", 6);
+        memcpy(start + 6, ctx->script_header, lenH);
+        memcpy(start + 6 + lenH, "<script type=\"text/javascript\">", 31);
+        memcpy(start + 6 + lenH + 31, ctx->script.start, len);
+        memcpy(start + 6 + lenH + 31 + len, "</script></head>", 16);
+      } else {
+        size_t lenH = strlen(ctx->script_header);
+        size_t lenP = lenH + 13;
+        char *start = s, *oldPage = ctx->page.start;
+
+        ctx_uw_buffer_check(ctx, "page", &ctx->page, uw_buffer_used(&ctx->page) + lenP);
+        start += ctx->page.start - oldPage;
+        memmove(start + lenP, start, uw_buffer_used(&ctx->page) - (start - ctx->page.start) + 1);
+        ctx->page.front += lenP;
+        memcpy(start, "<head>", 6);
+        memcpy(start + 6, ctx->script_header, lenH);
+        memcpy(start + 6 + lenH, "</head>", 7);
+      }
     }
   }
 }
@@ -3291,6 +3325,8 @@ void uw_prune_clients(uw_context ctx) {
   cutoff = time(NULL) - ctx->app->timeout;
 
   pthread_mutex_lock(&clients_mutex);
+  pruning_thread = pthread_self();
+  pruning_thread_initialized = 1;
 
   for (c = clients_used; c; c = next) {
     next = c->next;
@@ -3681,6 +3717,14 @@ uw_Basis_int uw_Basis_diffInSeconds(uw_context ctx, uw_Basis_time tm1, uw_Basis_
   return difftime(tm2.seconds, tm1.seconds);
 }
 
+uw_Basis_int uw_Basis_toMilliseconds(uw_context ctx, uw_Basis_time tm) {
+  return tm.seconds * 1000 + tm.microseconds / 1000;
+}
+
+uw_Basis_int uw_Basis_diffInMilliseconds(uw_context ctx, uw_Basis_time tm1, uw_Basis_time tm2) {
+  return uw_Basis_toMilliseconds(ctx, tm2) - uw_Basis_toMilliseconds(ctx, tm1);
+}
+
 uw_Basis_int uw_Basis_toSeconds(uw_context ctx, uw_Basis_time tm) {
   return tm.seconds;
 }
@@ -3912,8 +3956,6 @@ uw_Basis_time *uw_Basis_readUtc(uw_context ctx, uw_Basis_string s) {
     return NULL;
 }
 
-static const char begin_xhtml[] = "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"en\" lang=\"en\">";
-
 failure_kind uw_begin_onError(uw_context ctx, char *msg) {
   int r = setjmp(ctx->jmp_buf);
 
@@ -3954,7 +3996,14 @@ void uw_cutErrorLocation(char *s) {
 }
 
 uw_Basis_string uw_Basis_fresh(uw_context ctx) {
-  return uw_Basis_htmlifyInt(ctx, ctx->nextId++);
+  int len;
+  char *r;
+
+  uw_check_heap(ctx, 2+INTS_MAX);
+  r = ctx->heap.front;
+  sprintf(r, "uw%u%n", ctx->nextId++, &len);
+  ctx->heap.front += len+1;
+  return r;
 }
 
 uw_Basis_float uw_Basis_floatFromInt(uw_context ctx, uw_Basis_int n) {
@@ -3971,4 +4020,47 @@ uw_Basis_int uw_Basis_trunc(uw_context ctx, uw_Basis_float n) {
 
 uw_Basis_int uw_Basis_round(uw_context ctx, uw_Basis_float n) {
   return round(n);
+}
+
+uw_Basis_string uw_Basis_atom(uw_context ctx, uw_Basis_string s) {
+  char *p;
+
+  for (p = s; *p; ++p) {
+    char c = *p;
+    if (!isalnum(c) && c != '+' && c != '-' && c != '.' && c != '%' && c != '#')
+      uw_error(ctx, FATAL, "Disallowed character in CSS atom");
+  }
+
+  return s;
+}
+
+uw_Basis_string uw_Basis_css_url(uw_context ctx, uw_Basis_string s) {
+  char *p;
+
+  for (p = s; *p; ++p) {
+    char c = *p;
+    if (!isalnum(c) && c != ':' && c != '/' && c != '.' && c != '_' && c != '+'
+        && c != '-' && c != '%' && c != '?' && c != '&' && c != '=' && c != '#')
+      uw_error(ctx, FATAL, "Disallowed character in CSS URL");
+  }
+
+  return s;
+}
+
+uw_Basis_string uw_Basis_property(uw_context ctx, uw_Basis_string s) {
+  char *p;
+
+  if (!*s)
+    uw_error(ctx, FATAL, "Empty CSS property");
+
+  if (!islower(s[0]) && s[0] != '_')
+    uw_error(ctx, FATAL, "Bad initial character in CSS property");
+
+  for (p = s; *p; ++p) {
+    char c = *p;
+    if (!islower(c) && !isdigit(c) && c != '_' && c != '-')
+      uw_error(ctx, FATAL, "Disallowed character in CSS property");
+  }
+
+  return s;
 }

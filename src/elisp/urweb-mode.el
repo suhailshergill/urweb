@@ -67,6 +67,7 @@
 ;;; Code:
 
 (eval-when-compile (require 'cl))
+(require 'compile)
 (require 'urweb-util)
 (require 'urweb-move)
 (require 'urweb-defs)
@@ -151,7 +152,7 @@ See doc for the variable `urweb-mode-info'."
                  "PRIMARY" "KEY" "CONSTRAINT" "UNIQUE" "CHECK"
                  "FOREIGN" "REFERENCES" "ON" "NO" "ACTION" "CASCADE" "RESTRICT" "NULL"
                  "JOIN" "INNER" "OUTER" "LEFT" "RIGHT" "FULL" "CROSS" "SELECT1"
-                 "IF" "THEN" "ELSE" "COALESCE" "LIKE")
+                 "IF" "THEN" "ELSE" "COALESCE" "LIKE" "RANDOM")
   "A regexp that matches SQL keywords.")
 
 (defconst urweb-lident-regexp "\\<[a-z_][A-Za-z0-9_']*\\>"
@@ -393,6 +394,8 @@ This mode runs `urweb-mode-hook' just before exiting.
 
   ;; Compatibility.  FIXME: we should use `-' in Emacs-CVS.
   (unless (boundp 'skeleton-positions) (set (make-local-variable '@) nil))
+
+  (local-set-key (kbd "C-c C-c") 'compile)
 
   (urweb-mode-variables))
 
@@ -902,8 +905,6 @@ Optional argument STYLE is currently ignored."
 	;; Skip all other declarations that we find at the same level.
 	(urweb-skip-siblings))
       fullname)))
-
-
 
 (provide 'urweb-mode)
 
